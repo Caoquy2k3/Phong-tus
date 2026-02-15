@@ -68,27 +68,175 @@
     </div>
 
 <script>
-/* ---------- Key generation + localStorage mark ---------- */
-function generateRandomKey(){
-    const prefix = "PHONG-TUS-";
-    const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
-    let p = "";
-    for(let i=0;i<16;i++) p += chars.charAt(Math.floor(Math.random()*chars.length));
-    return prefix + p;
-}
-function markKeyAsUsed(key){
-    let used = JSON.parse(localStorage.getItem('usedKeys')||'[]');
-    if(!used.includes(key)){ used.push(key); localStorage.setItem('usedKeys', JSON.stringify(used)); }
-}
-function isKeyUsed(key){
-    let used = JSON.parse(localStorage.getItem('usedKeys')||'[]'); return used.includes(key);
-}
-function generateUniqueKey(){
-    let attempts=0, maxAttempts=100, k;
-    do{ k = generateRandomKey(); attempts++; if(attempts>maxAttempts){ localStorage.setItem('usedKeys','[]'); break; } } while(isKeyUsed(k));
-    return k;
-}
+/* ==== Safe key gen + localStorage handling ====
+   - Format: PHONG-TUS- + 16 ký tự [A-Z0-9]
+   - If ?ma present -> show it (only if valid format), else generate unique random key
+   - Saves used keys in localStorage 'usedKeys' (array)
+   - Updates URL with ?ma=KEY using history.replaceState
+   - Exposes small helpers on window.__KEY_UTILS
+=============================================*/
+(function(){
+  const PREFIX = "PHONG-TUS-";
+  const RANDOM_LEN = 16;
+  const CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
 
+  function generateRandomKey() {
+    let p = "";
+    for (let i = 0; i < RANDOM_LEN; i++) {
+      p += CHARS.charAt(Math.floor(Math.random() * CHARS.length));
+    }
+    return PREFIX + p;
+  }
+
+  function _loadUsed() {
+    try {
+      const raw = localStorage.getItem("usedKeys");
+      const arr = raw ? JSON.parse(raw) : [];
+      return Array.isArray(arr) ? arr : [];
+    } catch (e) {
+      return [];
+    }
+  }
+
+  function _saveUsed(arr) {
+    try {
+      localStorage.setItem("usedKeys", JSON.stringify(arr));
+    } catch (e) {
+      // ignore quota errors
+    }
+  }
+
+  function markKeyAsUsed(key){
+    if (!key) return;
+    const used = _loadUsed();
+    if (!used.includes(key)) {
+      used.push(key);
+      _saveUsed(used);
+    }
+  }
+
+  function isKeyUsed(key){
+    if (!key) return false;
+    const used = _loadUsed();
+    return used.includes(key);
+  }
+
+  function generateUniqueKey(maxAttempts = 100) {
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      const k = generateRandomKey();
+      if (!isKeyUsed(k)) {
+        // mark immediately to reduce duplicate generations
+        markKeyAsUsed(k);
+        return k;
+      }
+    }
+    // fallback if exhausted: generate and mark (rare)
+    const fallback = generateRandomKey();
+    markKeyAsUsed(fallback);
+    return fallback;
+  }
+
+  // expose helpers (non-intrusive)
+  window.__KEY_UTILS = {
+    generateRandomKey,
+    generateUniqueKey,
+    markKeyAsUsed,
+    isKeyUsed
+  };
+
+  function getParam(name) {
+    try {
+      const u = new URL(window.location.href);
+      return u.searchParams.get(name);
+    } catch (e) {
+      const m = window.location.search.match(new RegExp('[?&]' + name + '=([^&]+)'));
+      return m ? decodeURIComponent(m[1]) : null;
+    }
+  }
+
+  // decide final key: prefer valid ?ma param, otherwise generate unique
+  const keyInput = document.getElementById('keyInput');
+  let keyFromUrl = getParam('ma');
+  function isValidFormat(k) {
+    return typeof k === "string" && k.startsWith(PREFIX) && k.length === (PREFIX.length + RANDOM_LEN);
+  }
+
+  let finalKey;
+  if (isValidFormat(keyFromUrl)) {
+    finalKey = keyFromUrl.trim();
+    // mark it used (optional) - comment out if you don't want to mark keys from URL
+    markKeyAsUsed(finalKey);
+  } else {
+    finalKey = generateUniqueKey();
+    // update URL without reload for easy copying / verification
+    try {
+      const newUrl = window.location.origin + window.location.pathname + "?ma=" + encodeURIComponent(finalKey);
+      history.replaceState({}, "", newUrl);
+    } catch (e) { /* ignore */ }
+  }
+
+  // display finalKey
+  if (keyInput) keyInput.value = finalKey;
+
+  // copy helper (used by button)
+  function fallbackCopy(text) {
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.setAttribute("readonly", "");
+    ta.style.position = "absolute";
+    ta.style.left = "-9999px";
+    document.body.appendChild(ta);
+    ta.select();
+    try { document.execCommand("copy"); alert("Copied: " + text); }
+    catch(e) { prompt("Copy the key manually:", text); }
+    document.body.removeChild(ta);
+  }
+
+  function copyText(t){
+    if (!t) return;
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(t).then(()=> {
+        // optional toast: using alert for simplicity
+        // alert("Copied: " + t);
+      }).catch(()=> fallbackCopy(t));
+    } else fallbackCopy(t);
+  }
+
+  // If other code expects handleQueryParams/getkey, keep compatible:
+  window.handleQueryParams = function(){
+    const params = new URLSearchParams(window.location.search);
+    const getkey = params.get('getkey');
+    if (getkey === '1') {
+      const newKey = generateUniqueKey();
+      if (keyInput) keyInput.value = newKey;
+      markKeyAsUsed(newKey);
+      try {
+        const newUrl = window.location.origin + window.location.pathname + "?ma=" + encodeURIComponent(newKey);
+        history.replaceState({}, "", newUrl);
+      } catch(e){}
+    } else {
+      // nothing to do: finalKey already set above
+    }
+  };
+
+  // wire copy button if exists
+  const copyBtn = document.getElementById('copyButton');
+  if (copyBtn) {
+    copyBtn.addEventListener('click', async function(){
+      await copyText(finalKey);
+      // small UI feedback
+      const originalText = copyBtn.textContent;
+      copyBtn.textContent = '✅ Đã copy!';
+      setTimeout(()=> copyBtn.textContent = originalText, 1800);
+      // mark used on copy
+      markKeyAsUsed(finalKey);
+    });
+  }
+
+})();
+</script>
+
+<script>
 /* ---------- Time display ---------- */
 function updateTime(){
     const now = new Date();
@@ -100,71 +248,6 @@ function updateTime(){
     document.getElementById('dateDisplay').textContent = `Hôm nay là ngày ${d}/${m}/${y}`;
     document.title = `Key Ngày ${d}/${m}/${y} Là`;
     setTimeout(updateTime, 1000);
-}
-
-/* ---------- Handle URL params to fill key ---------- */
-function handleQueryParams(){
-    const params = new URLSearchParams(window.location.search);
-    const ma = params.get('ma');
-    const getkey = params.get('getkey');
-    const keyInput = document.getElementById('keyInput');
-
-    if(getkey === '1'){
-        const newKey = generateUniqueKey();
-        keyInput.value = newKey;
-        markKeyAsUsed(newKey); // nếu bạn muốn đánh dấu ngay khi tạo
-        console.log('Đã tạo key mới:', newKey);
-    } else if(ma){
-        keyInput.value = ma;
-    } else {
-        keyInput.value = generateRandomKey(); // mẫu
-    }
-}
-
-/* ---------- Copy + play music on copy ---------- */
-const copyBtn = document.getElementById('copyButton');
-copyBtn.addEventListener('click', copyToClipboard);
-
-async function copyToClipboard(){
-    const keyInput = document.getElementById('keyInput');
-    const key = keyInput.value || '';
-    if(!key) return;
-
-    // modern clipboard API
-    try {
-        await navigator.clipboard.writeText(key);
-    } catch (e) {
-        // fallback
-        keyInput.select();
-        document.execCommand('copy');
-    }
-
-    // feedback button text
-    const originalText = copyBtn.textContent;
-    copyBtn.textContent = '✅ Đã copy!';
-    setTimeout(()=> copyBtn.textContent = originalText, 2000);
-
-    // mark as used (optional - depending on logic)
-    markKeyAsUsed(key);
-
-    // start youtube music (if ready)
-    if (typeof ytPlayer !== 'undefined' && ytPlayerReady) {
-        // restart track from start
-        try {
-            ytPlayer.seekTo(0);
-            ytPlayer.playVideo();
-            musicButtonUpdateState(true);
-        } catch(err) {
-            console.warn('Không thể play youtube player:', err);
-        }
-    } else {
-        // if youtube API chưa sẵn sàng, cố gắng tạo player ngay bây giờ (sẽ play khi onReady gọi)
-        if (!ytPlayerInitializing) {
-            initYouTubePlayer(); // khởi tạo lần cuối nếu chưa
-        }
-        // lưu cờ yêu cầu phát khi ready
-        playWhenReady = true;
-    }
 }
 
 /* ---------- YouTube Player API integration ---------- */
@@ -205,7 +288,6 @@ function onYouTubeIframeAPIReady(){
             'onReady': function(e){
                 ytPlayerReady = true;
                 ytPlayerInitializing = false;
-                // đặt volume mặc định (0-100)
                 try { ytPlayer.setVolume(60); } catch(e){}
                 if (playWhenReady) {
                     ytPlayer.seekTo(0);
@@ -215,10 +297,7 @@ function onYouTubeIframeAPIReady(){
                 }
             },
             'onStateChange': function(event){
-                // state change handler nếu cần
-                // 0 = ended
                 if (event.data === 0) {
-                    // khi bài kết thúc, cập nhật nút
                     musicButtonUpdateState(false);
                 }
             }
@@ -233,18 +312,14 @@ musicBtn.addEventListener('click', toggleMusic);
 function toggleMusic(){
     if (typeof ytPlayer !== 'undefined' && ytPlayerReady) {
         const state = ytPlayer.getPlayerState();
-        // player states: -1 unstarted, 0 ended, 1 playing, 2 paused
         if (state === 1) {
             ytPlayer.pauseVideo(); musicButtonUpdateState(false);
         } else {
             ytPlayer.playVideo(); musicButtonUpdateState(true);
         }
     } else {
-        // if not ready, initialize (will play automatically if user just clicked)
         initYouTubePlayer();
-        // request to play when ready
         playWhenReady = true;
-        // change button to show pending play
         musicButtonUpdateState(true, '...Loading');
     }
 }
@@ -260,7 +335,8 @@ function musicButtonUpdateState(isPlaying, overrideText){
 /* ---------- Init ---------- */
 window.addEventListener('load', function(){
     updateTime();
-    handleQueryParams();
+    // keep compatibility: if legacy code calls handleQueryParams, it exists
+    if (typeof handleQueryParams === 'function') handleQueryParams();
     initYouTubePlayer(); // khởi động sớm (không autoplay) để sẵn sàng khi người dùng copy
 });
 </script>
