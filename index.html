@@ -5,214 +5,376 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
     <title>Key Ngày Hôm Nay Là</title>
     <style>
+        /* --- Facebook Style Variables --- */
+        :root {
+            --fb-blue: #1877f2;
+            --fb-bg: #f0f2f5;
+            --fb-card-bg: #ffffff;
+            --fb-green: #42b72a;
+            --fb-text-main: #050505;
+            --fb-text-sec: #65676b;
+            --fb-border: #dddfe2;
+            --fb-shadow: 0 2px 4px rgba(0, 0, 0, .1), 0 8px 16px rgba(0, 0, 0, .1);
+        }
+
         body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background-color: #f9f5f3;
+            font-family: 'Segoe UI', Helvetica, Arial, sans-serif; /* Font chuẩn Facebook */
+            background-color: var(--fb-bg);
             margin: 0;
             display: flex;
+            flex-direction: column;
             justify-content: center;
             align-items: center;
             min-height: 100vh;
+            color: var(--fb-text-main);
         }
-        .loading-container {
+
+        /* Logo text style imitation */
+        .fb-logo {
+            color: var(--fb-blue);
+            font-size: 40px;
+            font-weight: 700;
+            margin-bottom: 20px;
+            letter-spacing: -1px;
             text-align: center;
-            padding: 20px;
-            border: 2px solid #ef8682;
-            border-radius: 10px;
-            box-shadow: 0 0 20px rgba(0,0,0,0.2);
-            background-color: #fff;
-            animation: pulse 1.5s infinite;
-            width: 80vw;
-            max-width: 420px;
+            text-shadow: 0 1px 2px rgba(0,0,0,0.1);
         }
-        @keyframes pulse {
-            0%,100% { border-color: #ef8682; }
-            50% { border-color: #e9514d; }
+
+        .loading-container {
+            background-color: var(--fb-card-bg);
+            border-radius: 8px;
+            box-shadow: var(--fb-shadow);
+            padding: 25px;
+            width: 90%;
+            max-width: 396px; /* Kích thước chuẩn khung login FB */
+            text-align: center;
+            box-sizing: border-box;
         }
-        h1 { color:#03fcec; font-size:28px; margin-bottom:20px; }
-        .key-container { display:flex; flex-direction:column; align-items:center; }
-        input { text-align:center; width:80%; padding:12px; margin-bottom:20px; border:2px solid:#fc0303; border-radius:8px; font-size:16px; background:#f8f8f8; font-weight:bold; }
-        input:hover, input:focus { border-color:#e9514d; }
-        .button-group { display:flex; gap:10px; justify-content:center; flex-wrap:wrap; }
-        button { background:#ef8682; color:#fff; padding:12px 24px; border:none; border-radius:8px; cursor:pointer; font-size:16px; transition:background-color .3s; min-width:140px; }
-        button:hover { background:#e9514d; }
-        .footer { text-align:center; margin-top:20px; color:#555; font-size:14px; }
-        .admin-link { color:#ef8682; text-decoration:none; font-weight:bold; }
-        .admin-link:hover { text-decoration:underline; }
-        .key-label { font-size:14px; color:#888; margin-bottom:5px; }
+
+        h1 {
+            color: var(--fb-text-main);
+            font-size: 20px;
+            margin: 0 0 5px 0;
+            font-weight: 600;
+        }
+
+        .key-label {
+            font-size: 14px;
+            color: var(--fb-text-sec);
+            margin-bottom: 20px;
+            line-height: 1.4;
+        }
+
+        /* Input styling like FB Login input */
+        input[type="text"] {
+            width: 100%;
+            padding: 14px 16px;
+            margin-bottom: 15px;
+            border: 1px solid var(--fb-border);
+            border-radius: 6px;
+            font-size: 17px;
+            color: #1d2129;
+            box-sizing: border-box;
+            background: #f5f6f7;
+            text-align: center;
+            font-weight: bold;
+            transition: border-color 0.2s;
+        }
+        
+        input[type="text"]:focus {
+            outline: none;
+            border-color: var(--fb-blue);
+            box-shadow: 0 0 0 2px #e7f3ff;
+            background: #fff;
+        }
+
+        .button-group {
+            display: flex;
+            flex-direction: column; /* Stack buttons on mobile like FB */
+            gap: 12px;
+        }
+
+        /* Button styles */
+        button {
+            width: 100%;
+            padding: 12px;
+            border: none;
+            border-radius: 6px;
+            font-size: 20px;
+            font-weight: 700;
+            cursor: pointer;
+            transition: background-color 0.2s;
+            line-height: 24px;
+        }
+
+        #copyButton {
+            background-color: var(--fb-blue);
+            color: #fff;
+        }
+        #copyButton:hover {
+            background-color: #166fe5;
+        }
+
+        #musicButton {
+            background-color: var(--fb-green); /* Green accent */
+            color: #fff;
+            font-size: 17px; /* Smaller than main action */
+        }
+        #musicButton:hover {
+            background-color: #36a420;
+        }
+
+        /* Divider line */
+        .divider {
+            border-bottom: 1px solid var(--fb-border);
+            margin: 20px 0;
+        }
+
+        .date-display {
+            font-size: 14px;
+            color: var(--fb-text-sec);
+            margin-bottom: 10px;
+        }
+
+        .footer {
+            font-size: 12px;
+            color: #737373;
+            margin-top: 20px;
+        }
+        
+        .footer a {
+            color: var(--fb-text-sec);
+            font-weight: bold;
+            text-decoration: none;
+        }
+        .footer a:hover {
+            text-decoration: underline;
+        }
+
+        /* Ẩn player youtube */
+        #player { display: none; }
     </style>
 </head>
 <body>
+
+    <div class="fb-logo">facebook key</div>
+
     <div class="loading-container">
-        <h1>🔑 KEY CỦA BẠN LÀ</h1>
-        <div class="key-label">(Key tự động tạo hoặc lấy từ tham số ma)</div>
+        <h1>Lấy Key Ngày Hôm Nay</h1>
+        <div class="key-label">Hệ thống tự động tạo key hoặc lấy từ tham số</div>
+        
         <div class="key-container">
-            <input type="text" id="keyInput" readonly>
+            <input type="text" id="keyInput" readonly placeholder="Đang tạo key..." />
+            
             <div class="button-group">
-                <button id="copyButton" onclick="copyToClipboard()">📋 Copy Key</button>
-                <button id="musicButton" onclick="toggleMusic()">▶️ Play Music</button>
+                <button id="copyButton">Sao chép Key</button>
+                <div class="divider" style="margin: 5px 0; border:none;"></div>
+                <button id="musicButton">▶️ Bật Nhạc</button>
             </div>
         </div>
-        <div id="dateDisplay" style="margin-top:10px; font-size:18px; color:#555"></div>
+
+        <div class="divider"></div>
+
+        <div id="dateDisplay" class="date-display"></div>
         <div class="footer">
-            <b>Copyright By 
-                <a href="https://zalo.me/0822771058" class="admin-link">Nguyễn Duy Khánh</a> | 
-                Time: <span id="clock"></span>
-            </b>
+            <div style="margin-bottom:5px;">Time: <span id="clock" style="font-family:monospace;"></span></div>
+            <span>Copyright © 2026</span> <br>
+            Designed by <a href="https://zalo.me/0822771058">Nguyễn Duy Khánh</a>
         </div>
     </div>
 
-    <!-- YouTube player (ẩn) -->
-    <div id="yt-player-container" style="position:absolute; left:-9999px; width:1px; height:1px; overflow:hidden;">
-        <div id="ytPlayer"></div>
-    </div>
+    <div id="player"></div>
 
-    <script>
-        // ---------- KEY + TIME + UTILS (giữ nguyên logic của bạn, chỉ điều chỉnh nhẹ) ----------
-        function generateRandomKey() {
-            const prefix = "PHONG-TUS-";
-            const characters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
-            let randomPart = "";
-            for (let i = 0; i < 16; i++) {
-                randomPart += characters.charAt(Math.floor(Math.random() * characters.length));
-            }
-            return prefix + randomPart;
+<script>
+/* ==========================================================
+   GIỮ NGUYÊN PHẦN LOGIC JAVASCRIPT CỦA BẠN
+   ========================================================== */
+
+/* ---------- Key generation + localStorage mark ---------- */
+function generateRandomKey(){
+    const prefix = "PHONG-TUS-";
+    const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+    let p = "";
+    for(let i=0;i<16;i++) p += chars.charAt(Math.floor(Math.random()*chars.length));
+    return prefix + p;
+}
+function markKeyAsUsed(key){
+    let used = JSON.parse(localStorage.getItem('usedKeys')||'[]');
+    if(!used.includes(key)){ used.push(key); localStorage.setItem('usedKeys', JSON.stringify(used)); }
+}
+function isKeyUsed(key){
+    let used = JSON.parse(localStorage.getItem('usedKeys')||'[]'); return used.includes(key);
+}
+function generateUniqueKey(){
+    let attempts=0, maxAttempts=100, k;
+    do{ k = generateRandomKey(); attempts++; if(attempts>maxAttempts){ localStorage.setItem('usedKeys','[]'); break; } } while(isKeyUsed(k));
+    return k;
+}
+
+/* ---------- Time display ---------- */
+function updateTime(){
+    const now = new Date();
+    const hh = String(now.getHours()).padStart(2,'0');
+    const mm = String(now.getMinutes()).padStart(2,'0');
+    const ss = String(now.getSeconds()).padStart(2,'0');
+    const d = now.getDate(), m = now.getMonth()+1, y = now.getFullYear();
+    document.getElementById('clock').textContent = `${hh}:${mm}:${ss}`;
+    document.getElementById('dateDisplay').textContent = `Hôm nay là ngày ${d}/${m}/${y}`;
+    document.title = `Key Ngày ${d}/${m}/${y} Là`;
+    setTimeout(updateTime, 1000);
+}
+
+/* ---------- Handle URL params to fill key ---------- */
+function handleQueryParams(){
+    const params = new URLSearchParams(window.location.search);
+    const ma = params.get('ma');
+    const getkey = params.get('getkey');
+    const keyInput = document.getElementById('keyInput');
+
+    if(getkey === '1'){
+        const newKey = generateUniqueKey();
+        keyInput.value = newKey;
+        markKeyAsUsed(newKey); // nếu bạn muốn đánh dấu ngay khi tạo
+        console.log('Đã tạo key mới:', newKey);
+    } else if(ma){
+        keyInput.value = ma;
+    } else {
+        keyInput.value = generateRandomKey(); // mẫu
+    }
+}
+
+/* ---------- Copy + play music on copy ---------- */
+const copyBtn = document.getElementById('copyButton');
+copyBtn.addEventListener('click', copyToClipboard);
+
+async function copyToClipboard(){
+    const keyInput = document.getElementById('keyInput');
+    const key = keyInput.value || '';
+    if(!key) return;
+
+    // modern clipboard API
+    try {
+        await navigator.clipboard.writeText(key);
+    } catch (e) {
+        // fallback
+        keyInput.select();
+        document.execCommand('copy');
+    }
+
+    // feedback button text
+    const originalText = copyBtn.textContent;
+    copyBtn.textContent = '✅ Đã copy!';
+    copyBtn.style.backgroundColor = '#42b72a'; // Feedback xanh lá tạm thời
+    
+    setTimeout(()=> {
+        copyBtn.textContent = originalText;
+        copyBtn.style.backgroundColor = ''; // Revert color
+    }, 2000);
+
+    // mark as used
+    markKeyAsUsed(key);
+
+    // start youtube music (if ready)
+    if (typeof ytPlayer !== 'undefined' && ytPlayerReady) {
+        try {
+            ytPlayer.seekTo(0);
+            ytPlayer.playVideo();
+            musicButtonUpdateState(true);
+        } catch(err) {
+            console.warn('Không thể play youtube player:', err);
         }
-        function markKeyAsUsed(key) {
-            let usedKeys = JSON.parse(localStorage.getItem('usedKeys') || '[]');
-            if (!usedKeys.includes(key)) {
-                usedKeys.push(key);
-                localStorage.setItem('usedKeys', JSON.stringify(usedKeys));
-            }
+    } else {
+        if (!ytPlayerInitializing) {
+            initYouTubePlayer(); 
         }
-        function isKeyUsed(key) {
-            let usedKeys = JSON.parse(localStorage.getItem('usedKeys') || '[]');
-            return usedKeys.includes(key);
-        }
-        function generateUniqueKey() {
-            let maxAttempts = 100;
-            let attempts = 0;
-            let newKey;
-            do {
-                newKey = generateRandomKey();
-                attempts++;
-                if (attempts > maxAttempts) {
-                    localStorage.setItem('usedKeys', '[]');
-                    break;
+        playWhenReady = true;
+    }
+}
+
+/* ---------- YouTube Player API integration ---------- */
+let ytPlayer;
+let ytPlayerReady = false;
+let ytPlayerInitializing = false;
+let playWhenReady = false;
+const YT_VIDEO_ID = 'UKox4YEvLpg'; // ID bài hát
+
+function initYouTubePlayer(){
+    if (ytPlayerInitializing || typeof YT !== 'undefined' && ytPlayer) return;
+    ytPlayerInitializing = true;
+    if (!document.getElementById('yt-iframe-api')) {
+        const tag = document.createElement('script');
+        tag.id = 'yt-iframe-api';
+        tag.src = "https://www.youtube.com/iframe_api";
+        document.head.appendChild(tag);
+    }
+}
+
+function onYouTubeIframeAPIReady(){
+    ytPlayer = new YT.Player('player', {
+        height: '0',
+        width: '0',
+        videoId: YT_VIDEO_ID,
+        playerVars: {
+            autoplay: 0,
+            controls: 0,
+            rel: 0,
+            modestbranding: 1,
+            playsinline: 1
+        },
+        events: {
+            'onReady': function(e){
+                ytPlayerReady = true;
+                ytPlayerInitializing = false;
+                try { ytPlayer.setVolume(60); } catch(e){}
+                if (playWhenReady) {
+                    ytPlayer.seekTo(0);
+                    ytPlayer.playVideo();
+                    playWhenReady = false;
+                    musicButtonUpdateState(true);
                 }
-            } while (isKeyUsed(newKey));
-            return newKey;
-        }
-        function updateTime() {
-            var now = new Date();
-            var hours = now.getHours();
-            var minutes = now.getMinutes();
-            var seconds = now.getSeconds();
-            var day = now.getDate();
-            var month = now.getMonth() + 1;
-            var year = now.getFullYear();
-            hours = (hours < 10 ? "0" : "") + hours;
-            minutes = (minutes < 10 ? "0" : "") + minutes;
-            seconds = (seconds < 10 ? "0" : "") + seconds;
-            var timeString = hours + ":" + minutes + ":" + seconds;
-            document.getElementById("clock").innerHTML = timeString;
-            var dateString = `Hôm nay là ngày ${day}/${month}/${year}`;
-            document.getElementById("dateDisplay").innerHTML = dateString;
-            document.title = `Key Ngày ${day}/${month}/${year} Là`;
-            setTimeout(updateTime, 1000);
-        }
-        function handleQueryParams() {
-            const urlParams = new URLSearchParams(window.location.search);
-            const ma = urlParams.get('ma');
-            const getkey = urlParams.get('getkey');
-            const keyInput = document.getElementById('keyInput');
-            if (getkey === '1') {
-                const newKey = generateUniqueKey();
-                keyInput.value = newKey;
-                markKeyAsUsed(newKey);
-                console.log('Đã tạo key mới:', newKey);
-            } else if (ma) {
-                keyInput.value = ma;
-            } else {
-                const defaultKey = generateRandomKey();
-                keyInput.value = defaultKey;
-            }
-        }
-        function copyToClipboard() {
-            const keyInput = document.getElementById('keyInput');
-            keyInput.select();
-            keyInput.setSelectionRange(0, 99999);
-            document.execCommand('copy');
-            const copyBtn = document.getElementById('copyButton');
-            const originalText = copyBtn.textContent;
-            copyBtn.textContent = '✅ Đã copy!';
-            setTimeout(() => { copyBtn.textContent = originalText; }, 2000);
-        }
-
-        window.onload = function() {
-            updateTime();
-            handleQueryParams();
-        };
-
-        // ---------- YOUTUBE IFRAME PLAYER SETUP ----------
-        // ID video YouTube bạn gửi: UKox4YEvLpg
-        const YT_VIDEO_ID = 'UKox4YEvLpg';
-        let ytPlayer = null;
-        // Load IFrame API
-        (function loadYouTubeAPI(){
-            const tag = document.createElement('script');
-            tag.src = "https://www.youtube.com/iframe_api";
-            document.head.appendChild(tag);
-        })();
-
-        // This function will be called by the YouTube API when it's ready
-        function onYouTubeIframeAPIReady() {
-            ytPlayer = new YT.Player('ytPlayer', {
-                height: '0',
-                width: '0',
-                videoId: YT_VIDEO_ID,
-                playerVars: {
-                    'playsinline': 1,
-                    'autoplay': 0,     // không tự autoplay khi load trang (phần lớn trình duyệt chặn)
-                    'controls': 0,
-                    'rel': 0,
-                    'loop': 1,
-                    'playlist': YT_VIDEO_ID,
-                    'modestbranding': 1,
-                    'iv_load_policy': 3
-                },
-                events: {
-                    'onReady': function(event){
-                        // Tùy ý: đặt volume mặc định (0-100)
-                        try { event.target.setVolume(60); } catch(e){}
-                    },
-                    'onStateChange': function(e){
-                        // có thể xử lý trạng thái nếu cần
-                    }
+            },
+            'onStateChange': function(event){
+                if (event.data === 0) {
+                    musicButtonUpdateState(false);
                 }
-            });
+            }
         }
+    });
+}
 
-        // Toggle play/pause bằng YouTube player
-        function toggleMusic() {
-            const musicButton = document.getElementById('musicButton');
-            if (!ytPlayer || typeof ytPlayer.getPlayerState !== 'function') {
-                // nếu player chưa sẵn sàng, báo cho user
-                musicButton.textContent = '⌛ Đang tải...';
-                setTimeout(() => { musicButton.textContent = '▶️ Play Music'; }, 1500);
-                return;
-            }
-            const state = ytPlayer.getPlayerState();
-            // YT states: -1 (unstarted), 0 ended, 1 playing, 2 paused
-            if (state === YT.PlayerState.PLAYING) {
-                ytPlayer.pauseVideo();
-                musicButton.textContent = '▶️ Play Music';
-            } else {
-                // playVideo sẽ được coi là user gesture vì bấm nút
-                ytPlayer.playVideo();
-                musicButton.textContent = '⏸️ Pause Music';
-            }
+/* ---------- Music toggle button ---------- */
+const musicBtn = document.getElementById('musicButton');
+musicBtn.addEventListener('click', toggleMusic);
+
+function toggleMusic(){
+    if (typeof ytPlayer !== 'undefined' && ytPlayerReady) {
+        const state = ytPlayer.getPlayerState();
+        if (state === 1) {
+            ytPlayer.pauseVideo(); musicButtonUpdateState(false);
+        } else {
+            ytPlayer.playVideo(); musicButtonUpdateState(true);
         }
-    </script>
+    } else {
+        initYouTubePlayer();
+        playWhenReady = true;
+        musicButtonUpdateState(true, 'Đang tải...');
+    }
+}
+
+function musicButtonUpdateState(isPlaying, overrideText){
+    if (overrideText) {
+        musicBtn.textContent = '⏳ ' + overrideText;
+        return;
+    }
+    musicBtn.textContent = isPlaying ? '⏸️ Tạm Dừng' : '▶️ Bật Nhạc';
+}
+
+/* ---------- Init ---------- */
+window.addEventListener('load', function(){
+    updateTime();
+    handleQueryParams();
+    initYouTubePlayer(); 
+});
+</script>
 </body>
 </html>
