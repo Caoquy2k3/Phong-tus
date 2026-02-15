@@ -40,17 +40,42 @@
         button:hover { background-color:#e9514d; }
         .footer { text-align:center; margin-top:16px; color:#555; font-size:14px; }
         #player { display:none; } /* youtube player hidden */
+
+        /* Overlay when access is not allowed */
+        .blocked-overlay {
+            position: fixed;
+            inset: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: rgba(0,0,0,0.6);
+            z-index: 9999;
+            padding: 20px;
+            box-sizing: border-box;
+        }
+        .blocked-panel {
+            background: #fff;
+            padding: 18px;
+            border-radius: 10px;
+            max-width: 520px;
+            width: 100%;
+            text-align: center;
+            box-shadow: 0 8px 30px rgba(0,0,0,0.4);
+        }
+        .blocked-panel h2 { margin: 0 0 8px 0; color:#f60000; }
+        .blocked-panel p { color:#444; margin:0 0 14px 0; }
+        .blocked-panel a { color:#ef8682; text-decoration:none; font-weight:bold; }
     </style>
 </head>
 <body>
     <!-- Hidden container for YouTube player (kept hidden) -->
     <div id="player"></div>
 
-    <div class="loading-container">
+    <div class="loading-container" id="mainContainer">
         <h1>🔑 KEY CỦA BẠN LÀ</h1>
         <div class="key-label">(Key tự động tạo hoặc lấy từ tham số ma)</div>
 
-        <div class="key-container">
+        <div class="key-container" id="keyBox">
             <input type="text" id="keyInput" readonly />
             <div class="button-group">
                 <button id="copyButton">📋 Copy Key</button>
@@ -67,8 +92,21 @@
         </div>
     </div>
 
+    <!-- Blocked overlay (hidden by default) -->
+    <div class="blocked-overlay" id="blockedOverlay" style="display:none;">
+        <div class="blocked-panel">
+            <h2>⚠️ Web không tồn tại / Hoạt die web</h2>
+            <p>Trang này chỉ hiển thị key khi bạn mở từ link gốc (ví dụ: link4m) hoặc khi URL có tham số <code>?ma=...</code> / <code>?getkey=1</code>.</p>
+            <p>Nếu bạn đã mở link rút gọn, hãy thử nhấn "Kiểm tra lại".</p>
+            <div style="margin-top:12px;">
+                <button id="retryBtn" style="min-width:120px; margin-right:8px;">🔁 Kiểm tra lại</button>
+                <button id="openGuideBtn" style="min-width:120px;">🔗 Mở link hướng dẫn</button>
+            </div>
+        </div>
+    </div>
+
 <script>
-/* ---------- Key generation + localStorage mark ---------- */
+/* ---------- Key generation + localStorage mark (giữ nguyên logic) ---------- */
 function generateRandomKey(){
     const prefix = "PHONG-TUS-";
     const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
@@ -100,6 +138,42 @@ function updateTime(){
     document.getElementById('dateDisplay').textContent = `Hôm nay là ngày ${d}/${m}/${y}`;
     document.title = `Key Ngày ${d}/${m}/${y} Là`;
     setTimeout(updateTime, 1000);
+}
+
+/* ---------- Access control: block if not from allowed source ---------- */
+function checkAllowedAccess(){
+    const params = new URLSearchParams(window.location.search);
+    const ma = params.get('ma');
+    const getkey = params.get('getkey');
+    const ref = document.referrer || '';
+
+    // Các hostname nguồn cho phép (có thể mở rộng)
+    const allowedHosts = ['link4m.co', 'link4m.vn', 'link4m.com', 'l.link4m.co', 'link4m'];
+
+    // Kiểm tra nếu referrer chứa host cho phép
+    const hasAllowedRef = allowedHosts.some(h => ref.includes(h));
+
+    // Điều kiện cho phép: có ?ma=... OR ?getkey=1 OR referrer là link4m
+    if (ma || getkey === '1' || hasAllowedRef) {
+        return true;
+    }
+    return false;
+}
+
+function showBlockedOverlay(){
+    document.getElementById('blockedOverlay').style.display = 'flex';
+    // Ẩn phần key
+    document.getElementById('mainContainer').style.filter = 'blur(2px)';
+    // disable buttons
+    document.getElementById('copyButton').disabled = true;
+    document.getElementById('musicButton').disabled = true;
+}
+
+function hideBlockedOverlay(){
+    document.getElementById('blockedOverlay').style.display = 'none';
+    document.getElementById('mainContainer').style.filter = 'none';
+    document.getElementById('copyButton').disabled = false;
+    document.getElementById('musicButton').disabled = false;
 }
 
 /* ---------- Handle URL params to fill key ---------- */
@@ -260,8 +334,36 @@ function musicButtonUpdateState(isPlaying, overrideText){
 /* ---------- Init ---------- */
 window.addEventListener('load', function(){
     updateTime();
-    handleQueryParams();
-    initYouTubePlayer(); // khởi động sớm (không autoplay) để sẵn sàng khi người dùng copy
+
+    // Kiểm tra truy cập trước khi hiển thị key
+    if (!checkAllowedAccess()) {
+        // chặn hiển thị key và show overlay
+        showBlockedOverlay();
+    } else {
+        // bình thường: xử lý tham số và khởi tạo player
+        handleQueryParams();
+        initYouTubePlayer(); // khởi động sớm (không autoplay) để sẵn sàng khi người dùng copy
+    }
+
+    // nút retry cho overlay
+    document.getElementById('retryBtn').addEventListener('click', function(){
+        // thử lại: nếu referrer là link4m hoặc thêm ?ma=... thì overlay sẽ ẩn
+        if (checkAllowedAccess()) {
+            hideBlockedOverlay();
+            handleQueryParams();
+            initYouTubePlayer();
+        } else {
+            // reload để chắc chắn referrer được cập nhật (một số trình duyệt không set referrer khi đổi cách mở)
+            location.reload();
+        }
+    });
+
+    // nút mở link hướng dẫn (bạn có thể đổi URL chỉ dẫn vào đây)
+    document.getElementById('openGuideBtn').addEventListener('click', function(){
+        // mặc định mở trang gốc hiển thị key (bạn đổi KEY_WEB nếu muốn)
+        const guide = "https://caoquy2k3.github.io/Phong-tus/"; 
+        window.open(guide, '_blank');
+    });
 });
 </script>
 </body>
