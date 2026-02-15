@@ -5,191 +5,69 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
     <title>Key Ngày Hôm Nay Là</title>
     <style>
-        /* --- Facebook Style Variables --- */
-        :root {
-            --fb-blue: #1877f2;
-            --fb-bg: #f0f2f5;
-            --fb-card-bg: #ffffff;
-            --fb-green: #42b72a;
-            --fb-text-main: #050505;
-            --fb-text-sec: #65676b;
-            --fb-border: #dddfe2;
-            --fb-shadow: 0 2px 4px rgba(0, 0, 0, .1), 0 8px 16px rgba(0, 0, 0, .1);
-        }
-
         body {
-            font-family: 'Segoe UI', Helvetica, Arial, sans-serif; /* Font chuẩn Facebook */
-            background-color: var(--fb-bg);
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #f9f5f3;
             margin: 0;
             display: flex;
-            flex-direction: column;
             justify-content: center;
             align-items: center;
             min-height: 100vh;
-            color: var(--fb-text-main);
         }
-
-        /* Logo text style imitation */
-        .fb-logo {
-            color: var(--fb-blue);
-            font-size: 40px;
-            font-weight: 700;
-            margin-bottom: 20px;
-            letter-spacing: -1px;
-            text-align: center;
-            text-shadow: 0 1px 2px rgba(0,0,0,0.1);
-        }
-
         .loading-container {
-            background-color: var(--fb-card-bg);
-            border-radius: 8px;
-            box-shadow: var(--fb-shadow);
-            padding: 25px;
-            width: 90%;
-            max-width: 396px; /* Kích thước chuẩn khung login FB */
             text-align: center;
-            box-sizing: border-box;
+            padding: 20px;
+            border: 2px solid #ef8682;
+            border-radius: 10px;
+            box-shadow: 0 0 20px rgba(0,0,0,0.2);
+            background-color: #fff;
+            width: 80vw;
+            max-width: 420px;
         }
-
-        h1 {
-            color: var(--fb-text-main);
-            font-size: 20px;
-            margin: 0 0 5px 0;
-            font-weight: 600;
+        h1 { color: #03fcec; font-size: 28px; margin-bottom: 12px; }
+        .key-label { font-size: 14px; color: #888; margin-bottom: 5px; }
+        .key-container { display:flex; flex-direction:column; align-items:center; }
+        input {
+            text-align:center; width:80%; padding:12px; margin-bottom:12px;
+            border:2px solid #fc0303; border-radius:8px; font-size:16px;
+            background:#f8f8f8; font-weight:bold;
         }
-
-        .key-label {
-            font-size: 14px;
-            color: var(--fb-text-sec);
-            margin-bottom: 20px;
-            line-height: 1.4;
-        }
-
-        /* Input styling like FB Login input */
-        input[type="text"] {
-            width: 100%;
-            padding: 14px 16px;
-            margin-bottom: 15px;
-            border: 1px solid var(--fb-border);
-            border-radius: 6px;
-            font-size: 17px;
-            color: #1d2129;
-            box-sizing: border-box;
-            background: #f5f6f7;
-            text-align: center;
-            font-weight: bold;
-            transition: border-color 0.2s;
-        }
-        
-        input[type="text"]:focus {
-            outline: none;
-            border-color: var(--fb-blue);
-            box-shadow: 0 0 0 2px #e7f3ff;
-            background: #fff;
-        }
-
-        .button-group {
-            display: flex;
-            flex-direction: column; /* Stack buttons on mobile like FB */
-            gap: 12px;
-        }
-
-        /* Button styles */
+        .button-group { display:flex; gap:10px; justify-content:center; flex-wrap:wrap; }
         button {
-            width: 100%;
-            padding: 12px;
-            border: none;
-            border-radius: 6px;
-            font-size: 20px;
-            font-weight: 700;
-            cursor: pointer;
-            transition: background-color 0.2s;
-            line-height: 24px;
+            background-color:#ef8682; color:#fff; padding:12px 18px; border:none;
+            border-radius:8px; cursor:pointer; font-size:15px; min-width:140px;
         }
-
-        #copyButton {
-            background-color: var(--fb-blue);
-            color: #fff;
-        }
-        #copyButton:hover {
-            background-color: #166fe5;
-        }
-
-        #musicButton {
-            background-color: var(--fb-green); /* Green accent */
-            color: #fff;
-            font-size: 17px; /* Smaller than main action */
-        }
-        #musicButton:hover {
-            background-color: #36a420;
-        }
-
-        /* Divider line */
-        .divider {
-            border-bottom: 1px solid var(--fb-border);
-            margin: 20px 0;
-        }
-
-        .date-display {
-            font-size: 14px;
-            color: var(--fb-text-sec);
-            margin-bottom: 10px;
-        }
-
-        .footer {
-            font-size: 12px;
-            color: #737373;
-            margin-top: 20px;
-        }
-        
-        .footer a {
-            color: var(--fb-text-sec);
-            font-weight: bold;
-            text-decoration: none;
-        }
-        .footer a:hover {
-            text-decoration: underline;
-        }
-
-        /* Ẩn player youtube */
-        #player { display: none; }
+        button:hover { background-color:#e9514d; }
+        .footer { text-align:center; margin-top:16px; color:#555; font-size:14px; }
+        #player { display:none; } /* youtube player hidden */
     </style>
 </head>
 <body>
-
-    <div class="fb-logo">facebook key</div>
+    <!-- Hidden container for YouTube player (kept hidden) -->
+    <div id="player"></div>
 
     <div class="loading-container">
-        <h1>Lấy Key Ngày Hôm Nay</h1>
-        <div class="key-label">Hệ thống tự động tạo key hoặc lấy từ tham số</div>
-        
+        <h1>🔑 KEY CỦA BẠN LÀ</h1>
+        <div class="key-label">(Key tự động tạo hoặc lấy từ tham số ma)</div>
+
         <div class="key-container">
-            <input type="text" id="keyInput" readonly placeholder="Đang tạo key..." />
-            
+            <input type="text" id="keyInput" readonly />
             <div class="button-group">
-                <button id="copyButton">Sao chép Key</button>
-                <div class="divider" style="margin: 5px 0; border:none;"></div>
-                <button id="musicButton">▶️ Bật Nhạc</button>
+                <button id="copyButton">📋 Copy Key</button>
+                <button id="musicButton">▶️ Play Music</button>
             </div>
         </div>
 
-        <div class="divider"></div>
-
-        <div id="dateDisplay" class="date-display"></div>
+        <div id="dateDisplay" style="margin-top:10px; font-size:18px; color:#555;"></div>
         <div class="footer">
-            <div style="margin-bottom:5px;">Time: <span id="clock" style="font-family:monospace;"></span></div>
-            <span>Copyright © 2026</span> <br>
-            Designed by <a href="https://zalo.me/0822771058">Nguyễn Duy Khánh</a>
+            <b>Copyright By
+                <a href="https://zalo.me/0822771058" style="color:#ef8682; text-decoration:none;">Nguyễn Duy Khánh</a>
+                | Time: <span id="clock"></span>
+            </b>
         </div>
     </div>
 
-    <div id="player"></div>
-
 <script>
-/* ==========================================================
-   GIỮ NGUYÊN PHẦN LOGIC JAVASCRIPT CỦA BẠN
-   ========================================================== */
-
 /* ---------- Key generation + localStorage mark ---------- */
 function generateRandomKey(){
     const prefix = "PHONG-TUS-";
@@ -264,18 +142,14 @@ async function copyToClipboard(){
     // feedback button text
     const originalText = copyBtn.textContent;
     copyBtn.textContent = '✅ Đã copy!';
-    copyBtn.style.backgroundColor = '#42b72a'; // Feedback xanh lá tạm thời
-    
-    setTimeout(()=> {
-        copyBtn.textContent = originalText;
-        copyBtn.style.backgroundColor = ''; // Revert color
-    }, 2000);
+    setTimeout(()=> copyBtn.textContent = originalText, 2000);
 
-    // mark as used
+    // mark as used (optional - depending on logic)
     markKeyAsUsed(key);
 
     // start youtube music (if ready)
     if (typeof ytPlayer !== 'undefined' && ytPlayerReady) {
+        // restart track from start
         try {
             ytPlayer.seekTo(0);
             ytPlayer.playVideo();
@@ -284,31 +158,37 @@ async function copyToClipboard(){
             console.warn('Không thể play youtube player:', err);
         }
     } else {
+        // if youtube API chưa sẵn sàng, cố gắng tạo player ngay bây giờ (sẽ play khi onReady gọi)
         if (!ytPlayerInitializing) {
-            initYouTubePlayer(); 
+            initYouTubePlayer(); // khởi tạo lần cuối nếu chưa
         }
+        // lưu cờ yêu cầu phát khi ready
         playWhenReady = true;
     }
 }
 
 /* ---------- YouTube Player API integration ---------- */
+/* Sử dụng video ID từ YouTube link bạn gửi: UKox4YEvLpg */
 let ytPlayer;
 let ytPlayerReady = false;
 let ytPlayerInitializing = false;
 let playWhenReady = false;
-const YT_VIDEO_ID = 'UKox4YEvLpg'; // ID bài hát
-
+const YT_VIDEO_ID = 'UKox4YEvLpg'; // đổi nếu cần
+// tải API
 function initYouTubePlayer(){
     if (ytPlayerInitializing || typeof YT !== 'undefined' && ytPlayer) return;
     ytPlayerInitializing = true;
+    // inject YT iframe api script if not present
     if (!document.getElementById('yt-iframe-api')) {
         const tag = document.createElement('script');
         tag.id = 'yt-iframe-api';
         tag.src = "https://www.youtube.com/iframe_api";
         document.head.appendChild(tag);
     }
+    // onYouTubeIframeAPIReady sẽ được gọi bởi API khi script load
 }
 
+// API callback (YouTube yêu cầu hàm toàn cục)
 function onYouTubeIframeAPIReady(){
     ytPlayer = new YT.Player('player', {
         height: '0',
@@ -325,6 +205,7 @@ function onYouTubeIframeAPIReady(){
             'onReady': function(e){
                 ytPlayerReady = true;
                 ytPlayerInitializing = false;
+                // đặt volume mặc định (0-100)
                 try { ytPlayer.setVolume(60); } catch(e){}
                 if (playWhenReady) {
                     ytPlayer.seekTo(0);
@@ -334,7 +215,10 @@ function onYouTubeIframeAPIReady(){
                 }
             },
             'onStateChange': function(event){
+                // state change handler nếu cần
+                // 0 = ended
                 if (event.data === 0) {
+                    // khi bài kết thúc, cập nhật nút
                     musicButtonUpdateState(false);
                 }
             }
@@ -349,15 +233,19 @@ musicBtn.addEventListener('click', toggleMusic);
 function toggleMusic(){
     if (typeof ytPlayer !== 'undefined' && ytPlayerReady) {
         const state = ytPlayer.getPlayerState();
+        // player states: -1 unstarted, 0 ended, 1 playing, 2 paused
         if (state === 1) {
             ytPlayer.pauseVideo(); musicButtonUpdateState(false);
         } else {
             ytPlayer.playVideo(); musicButtonUpdateState(true);
         }
     } else {
+        // if not ready, initialize (will play automatically if user just clicked)
         initYouTubePlayer();
+        // request to play when ready
         playWhenReady = true;
-        musicButtonUpdateState(true, 'Đang tải...');
+        // change button to show pending play
+        musicButtonUpdateState(true, '...Loading');
     }
 }
 
@@ -366,14 +254,14 @@ function musicButtonUpdateState(isPlaying, overrideText){
         musicBtn.textContent = '⏳ ' + overrideText;
         return;
     }
-    musicBtn.textContent = isPlaying ? '⏸️ Tạm Dừng' : '▶️ Bật Nhạc';
+    musicBtn.textContent = isPlaying ? '⏸️ Pause Music' : '▶️ Play Music';
 }
 
 /* ---------- Init ---------- */
 window.addEventListener('load', function(){
     updateTime();
     handleQueryParams();
-    initYouTubePlayer(); 
+    initYouTubePlayer(); // khởi động sớm (không autoplay) để sẵn sàng khi người dùng copy
 });
 </script>
 </body>
