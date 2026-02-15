@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Key Ngày Hôm Nay Là</title>
+    <script>
+        function updateTime() {
+            var now = new Date();
+            var hours = now.getHours();
+            var minutes = now.getMinutes();
+            var seconds = now.getSeconds();
+            var day = now.getDate();
+            var month = now.getMonth() + 1; // Tháng bắt đầu từ 0
+            var year = now.getFullYear();
+
+            hours = (hours < 10 ? "0" : "") + hours;
+            minutes = (minutes < 10 ? "0" : "") + minutes;
+            seconds = (seconds < 10 ? "0" : "") + seconds;
+
+            var timeString = hours + ":" + minutes + ":" + seconds;
+            document.getElementById("clock").innerHTML = timeString;
+
+            // Cập nhật ngày
+            var dateString = `Hôm nay là ngày ${day}/${month}/${year}`;
+            document.getElementById("dateDisplay").innerHTML = dateString;
+
+            // Cập nhật tiêu đề
+            document.title = `Key Ngày ${day}/${month}/${year} Là`;
+
+            setTimeout(updateTime, 1000);
+        }
+
+        function getQueryParam() {
+            const urlParams = new URLSearchParams(window.location.search);
+            const key = urlParams.get('ma');
+            const keyInput = document.getElementById('keyInput');
+            if (key) {
+                keyInput.value = key;
+            } else {
+                keyInput.value = 'No key found';
+            }
+        }
+
+        function copyToClipboard() {
+            const keyInput = document.getElementById('keyInput');
+            keyInput.select();
+            document.execCommand('copy');
+            alert('Key copied to clipboard: ' + keyInput.value);
+        }
+
+        function toggleMusic() {
+            const music = document.getElementById('backgroundMusic');
+            const musicButton = document.getElementById('musicButton');
+
+            if (music.paused) {
+                music.play();
+                musicButton.textContent = 'Pause Music';
+            } else {
+                music.pause();
+                musicButton.textContent = 'Play Music';
+            }
+        }
+
+        window.onload = function () {
+            updateTime();
+            getQueryParam();
+        };
+    </script>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #f9f5f3;
+            margin: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+        }
+        .loading-container {
+            text-align: center;
+            padding: 20px;
+            border: 2px solid #ef8682;
+            border-radius: 10px;
+            box-shadow: 0 0 20px rgba(0, 0, 0, 0.2);
+            background-color: #fff;
+            animation: pulse 1.5s infinite;
+            width: 80vw;
+            max-width: 400px;
+        }
+        @keyframes pulse {
+            0%, 100% {
+                border-color: #ef8682;
+            }
+            50% {
+                border-color: #e9514d;
+            }
+        }
+        h1 {
+            color: #03fcec;
+            font-size: 28px;
+            margin-bottom: 20px;
+        }
+        .key-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        input {
+            text-align: center;
+            width: 80%;
+            padding: 12px;
+            margin-bottom: 20px;
+            border: 2px solid #fc0303;
+            border-radius: 8px;
+            font-size: 16px;
+            transition: border-color 0.3s ease-in-out;
+        }
+        input:hover, input:focus {
+            border-color: #e9514d;
+        }
+        button {
+            background-color: #ef8682;
+            color: #fff;
+            padding: 12px 24px;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 16px;
+            transition: background-color 0.3s ease-in-out;
+            margin-bottom: 10px;
+        }
+        button:hover {
+            background-color: #e9514d;
+        }
+        .footer {
+            text-align: center;
+            margin-top: 20px;
+            color: #555;
+            font-size: 14px;
+        }
+    </style>
+</head>
+<body>
+    <!-- Bật nhạc nền -->
+    <audio id="backgroundMusic" loop>
+        <source src="https://rr4---sn-npoeens7.googlevideo.com/videoplayback?expire=1738570417&ei=USagZ4Vk6_nE3w-x7KCJBg&ip=172.64.236.154&id=o-AAimGCMhLlnkFgQqbULLm4c5rLQiwpJXAB9aLLiMq4KH&itag=140&source=youtube&requiressl=yes&xpc=EgVo2aDSNQ%3D%3D&bui=AY2Et-NhXWJuEA_aAiv4s4CMjS0GNJ5kVy9qweCNCESmMcFo7gwC7u2n02jFCTAEYi17h2MNMEdZl1cQ&spc=9kzgDe0cTB4wLXbrqCENjNXF39FeMaXArlp1tUthP0Mj7BFN6PRwObzbGw&vprv=1&svpuc=1&mime=audio%2Fmp4&ns=ciOnzHLpGKSoPvsrdclhYhoQ&rqh=1&gir=yes&clen=12915678&dur=798.000&lmt=1726163663589433&keepalive=yes&lmw=1&fexp=24350590,24350737,24350827,24350933,24350961,24350977,24350999,24351028,24351059,24351082,51326932,51371294&c=TVHTML5&sefc=1&txp=5432434&n=oOVy0aSPT2m58w&sparams=expire%2Cei%2Cip%2Cid%2Citag%2Csource%2Crequiressl%2Cxpc%2Cbui%2Cspc%2Cvprv%2Csvpuc%2Cmime%2Cns%2Crqh%2Cgir%2Cclen%2Cdur%2Clmt&sig=AJfQdSswRAIgdqeR7ocPNLzfZ8ZpZkVJl9uhPiHnTmW-oIiDy0YosScCIGMbR3y4GUPaOW9VkEYfsnYGZDMJ1_1ub20amE3pVmcd&title=Cari+Pokemon+-+Mit+x+AM+Remix+%E2%9C%AA+Mochi+Entertainment+%7C%7C+Nh%E1%BA%A1c+Hot+Tiktok+Hay+Nh%E1%BA%A5t+2023%23mochi&rm=sn-h5q6l7l&rrc=104,80&req_id=442fafdb2aeca3ee&ipbypass=yes&redirect_counter=2&cm2rm=sn-8qj-2m0e7s&cms_redirect=yes&cmsv=e&met=1738548821,&mh=0l&mip=2001:ee0:4e1d:40f0:9918:bf84:9f64:6e22&mm=29&mn=sn-npoeens7&ms=rdu&mt=1738548536&mv=m&mvi=4&pl=48&rms=rdu,au&lsparams=ipbypass,met,mh,mip,mm,mn,ms,mv,mvi,pl,rms&lsig=AGluJ3MwRgIhAPO94cqTh07m1khvJ4OP-lmnxEMqYdMS4DdevPGj-IEbAiEAmoIOxCicTNa-4Z5bebL0gq_d-TwAiwySZjFQUB5sSu8%3D" type="audio/mpeg">
+        Your browser does not support the audio element.
+    </audio>
+
+    <div class="loading-container">
+        <h1>Key Ngày Là</h1>
+        <div class="key-container">
+            <input type="text" id="keyInput" readonly>
+            <button onclick="copyToClipboard()">Copy Key</button>
+            <button id="musicButton" onclick="toggleMusic()">Play Music</button>
+        </div>
+        <div id="dateDisplay" style="margin-top: 10px; font-size: 18px; color: #555;"></div>
+        <div class="footer">
+            <b>Copyright By 
+                <a href="https://zalo.me/0822771058" class="admin-link">Nguyễn Duy Khánh</a> | 
+                Time: <span id="clock"></span>
+            </b>
+        </div>
+    </div>
+</body>
+</html>
