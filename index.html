@@ -1,157 +1,74 @@
 <!DOCTYPE html>
 <html lang="vi">
 <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
     <title>Key Ngày Hôm Nay Là</title>
     <style>
-        :root{
-            --accent:#ff4655;
-            --muted:#9aa0a6;
-            --bg:#0f1720;
-            --card:#0b1318;
-            --glass: rgba(255,255,255,0.04);
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #f9f5f3;
+            margin: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
         }
-        html,body{height:100%;margin:0;font-family:Inter, "Segoe UI", Roboto, Arial, sans-serif;background:var(--bg);color:#e6eef2;}
-        /* main container (hidden when overlay active) */
-        .main-wrap{
-            display:flex;align-items:center;justify-content:center;min-height:100vh;padding:20px;
+        .loading-container {
+            text-align: center;
+            padding: 20px;
+            border: 2px solid #ef8682;
+            border-radius: 10px;
+            box-shadow: 0 0 20px rgba(0,0,0,0.2);
+            background-color: #fff;
+            width: 80vw;
+            max-width: 420px;
         }
-        .card{
-            width:100%;max-width:420px;padding:20px;border-radius:12px;background:linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));box-shadow:0 8px 40px rgba(0,0,0,0.6);text-align:center;
-            border:1px solid rgba(255,255,255,0.03);
+        h1 { color: #03fcec; font-size: 28px; margin-bottom: 12px; }
+        .key-label { font-size: 14px; color: #888; margin-bottom: 5px; }
+        .key-container { display:flex; flex-direction:column; align-items:center; }
+        input {
+            text-align:center; width:80%; padding:12px; margin-bottom:12px;
+            border:2px solid #fc0303; border-radius:8px; font-size:16px;
+            background:#f8f8f8; font-weight:bold;
         }
-        .card h1{font-size:22px;margin:8px 0;color:#90f2ff}
-        .card input{width:85%;padding:12px;border-radius:10px;border:2px solid rgba(255,255,255,0.06);background:#071018;color:#dff6ff;font-weight:700;text-align:center}
-        .btns{display:flex;gap:10px;justify-content:center;margin-top:14px;flex-wrap:wrap}
-        .btn{min-width:140px;padding:12px 16px;border-radius:10px;border:none;cursor:pointer;background:var(--accent);color:#fff;font-weight:600}
-        .small{font-size:13px;color:var(--muted);margin-top:12px}
-
-        /* SITE-DOWN overlay (full screen) */
-        .down-overlay{
-            position:fixed;inset:0;display:flex;align-items:center;justify-content:center;
-            background:linear-gradient(180deg, rgba(2,6,11,0.92), rgba(2,6,11,0.96));
-            z-index:99999;padding:24px;backdrop-filter: blur(6px);
+        .button-group { display:flex; gap:10px; justify-content:center; flex-wrap:wrap; }
+        button {
+            background-color:#ef8682; color:#fff; padding:12px 18px; border:none;
+            border-radius:8px; cursor:pointer; font-size:15px; min-width:140px;
         }
-        .down-card{
-            max-width:980px;width:100%;display:grid;grid-template-columns:1fr 1fr;gap:28px;align-items:center;
-            background:linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));border-radius:14px;padding:28px;border:1px solid rgba(255,255,255,0.04);
-            box-shadow:0 30px 80px rgba(0,0,0,0.7);
-        }
-        .down-illustration{
-            display:flex;flex-direction:column;align-items:center;justify-content:center;padding:8px;
-        }
-        .server-icon{
-            width:140px;height:140px;border-radius:16px;display:flex;align-items:center;justify-content:center;
-            background:linear-gradient(135deg,#111416,#081014);border:1px solid rgba(255,255,255,0.04);
-            box-shadow:0 10px 40px rgba(0,0,0,0.6), inset 0 -6px 30px rgba(255,70,90,0.02);
-            position:relative;overflow:hidden;
-        }
-        .server-icon:after{
-            content:"";position:absolute;inset:0;background:
-            conic-gradient(from 200deg at 50% 30%, rgba(255,70,90,0.08), transparent 40%),
-            linear-gradient(180deg, rgba(255,255,255,0.02), transparent);
-            mix-blend-mode:overlay;
-        }
-        .server-icon svg{width:72px;height:72px;filter:drop-shadow(0 8px 28px rgba(0,0,0,0.6));}
-        .down-title{font-size:24px;font-weight:700;margin:6px 0;color:#fff}
-        .down-sub{color:var(--muted);font-size:15px;max-width:420px;text-align:center}
-
-        /* right column */
-        .down-info{display:flex;flex-direction:column;gap:12px;align-items:flex-start;}
-        .error-code{font-size:56px;font-weight:800;color:rgba(255,255,255,0.92);letter-spacing:2px}
-        .error-msg{font-size:18px;color:#dbeef8}
-        .error-note{color:var(--muted);font-size:14px}
-        .down-actions{display:flex;gap:12px;margin-top:6px}
-        .ghost{background:transparent;border:1px solid rgba(255,255,255,0.08);color:#eaf7ff;padding:10px 14px;border-radius:10px;cursor:pointer;font-weight:700}
-        .primary{background:#1a9cff;border:none;color:white;padding:10px 14px;border-radius:10px;cursor:pointer;font-weight:800}
-        .retry-dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--accent);margin-left:8px;animation:blink 1.2s infinite}
-        @keyframes blink {0%{opacity:1}50%{opacity:0.15}100%{opacity:1}}
-
-        /* responsive */
-        @media (max-width:840px){
-            .down-card{grid-template-columns:1fr; text-align:center;}
-            .down-info{align-items:center}
-        }
+        button:hover { background-color:#e9514d; }
+        .footer { text-align:center; margin-top:16px; color:#555; font-size:14px; }
+        #player { display:none; } /* youtube player hidden */
     </style>
 </head>
 <body>
-    <!-- MAIN CONTENT (KEY UI) -->
-    <div class="main-wrap" id="mainContainer">
-        <div class="card">
-            <h1>🔑 KEY CỦA BẠN LÀ</h1>
-            <div style="color:var(--muted);font-size:13px;margin-bottom:8px;">(Hiển thị khi mở từ link rút gọn hoặc có ?ma=...)</div>
-            <input id="keyInput" readonly placeholder="— Không có key —" />
-            <div class="btns" style="margin-top:12px">
-                <button class="btn" id="copyButton">📋 Copy Key</button>
-                <button class="btn" id="musicButton">▶️ Play Music</button>
+    <!-- Hidden container for YouTube player (kept hidden) -->
+    <div id="player"></div>
+
+    <div class="loading-container">
+        <h1>🔑 KEY CỦA BẠN LÀ</h1>
+        <div class="key-label">(Key tự động tạo hoặc lấy từ tham số ma)</div>
+
+        <div class="key-container">
+            <input type="text" id="keyInput" readonly />
+            <div class="button-group">
+                <button id="copyButton">📋 Copy Key</button>
+                <button id="musicButton">▶️ Play Music</button>
             </div>
-            <div class="small">Nếu không thấy key, mở bằng link gốc hoặc kiểm tra lại referrer.</div>
         </div>
-    </div>
 
-    <!-- SITE DOWN OVERLAY -->
-    <div class="down-overlay" id="downOverlay" style="display:none;">
-        <div class="down-card" role="alert" aria-live="assertive">
-            <div class="down-illustration">
-                <div class="server-icon" aria-hidden="true">
-                    <!-- simple server / cross SVG -->
-                    <svg viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
-                        <rect x="6" y="10" width="52" height="12" rx="2" fill="#071016"/>
-                        <rect x="6" y="28" width="52" height="12" rx="2" fill="#071016"/>
-                        <rect x="6" y="46" width="52" height="10" rx="2" fill="#071016"/>
-                        <path d="M18 16h3M18 34h3M18 50h3" stroke="#8fbfff" stroke-width="1.6" stroke-linecap="round"/>
-                        <circle cx="52" cy="16" r="2.6" fill="#ff6b6b"/>
-                        <circle cx="52" cy="34" r="2.6" fill="#ffc857"/>
-                        <circle cx="52" cy="50" r="2.6" fill="#6ef07a"/>
-                        <!-- big X to indicate down -->
-                        <g transform="translate(8,8) scale(0.9)">
-                            <path d="M40 12 L52 24 M52 12 L40 24" stroke="#ff6b6b" stroke-width="3.6" stroke-linecap="round"/>
-                        </g>
-                    </svg>
-                </div>
-
-                <div style="margin-top:16px">
-                    <div class="down-title">Trang web tạm thời không hoạt động</div>
-                    <div class="down-sub">Chúng tôi phát hiện trang này hiện đang không phản hồi — có thể do hosting hoặc tên miền.</div>
-                </div>
-            </div>
-
-            <div class="down-info">
-                <div>
-                    <div class="error-code">503</div>
-                    <div class="error-msg">Dịch vụ tạm thời không khả dụng</div>
-                    <div class="error-note" style="margin-top:8px;">
-                        Máy chủ không phản hồi / DNS lỗi hoặc hosting đã tạm ngắt.<br>
-                        Hệ thống đang cố gắng khôi phục — thử lại sau vài phút.
-                    </div>
-                </div>
-
-                <div style="width:100%;display:flex;flex-direction:column;align-items:flex-start;">
-                    <div class="down-actions" style="margin-top:6px;">
-                        <button class="primary" id="downRetryBtn">🔁 Thử lại <span class="retry-dot" aria-hidden="true"></span></button>
-                        <button class="ghost" id="downOpenGuideBtn">🏠 Trang hướng dẫn</button>
-                    </div>
-
-                    <div style="margin-top:14px;color:var(--muted);font-size:13px;">
-                        Nếu bạn là quản trị viên trang, kiểm tra:
-                        <ul style="color:var(--muted);margin:8px 0 0 18px;padding:0;">
-                            <li>Trạng thái hosting / control panel</li>
-                            <li>Thiết lập DNS (A record / CNAME) và hạn TTL</li>
-                            <li>Hóa đơn thanh toán / renew tên miền</li>
-                        </ul>
-                    </div>
-
-                    <div style="margin-top:12px;color:var(--muted);font-size:13px;">
-                        Liên hệ hỗ trợ: <a href="mailto:admin@example.com" style="color:#9fe4ff;text-decoration:none">admin@example.com</a>
-                    </div>
-                </div>
-            </div>
+        <div id="dateDisplay" style="margin-top:10px; font-size:18px; color:#555;"></div>
+        <div class="footer">
+            <b>Copyright By
+                <a href="https://zalo.me/0822771058" style="color:#ef8682; text-decoration:none;">Nguyễn Duy Khánh</a>
+                | Time: <span id="clock"></span>
+            </b>
         </div>
     </div>
 
 <script>
-/* ---------- Key logic (giữ nguyên) ---------- */
+/* ---------- Key generation + localStorage mark ---------- */
 function generateRandomKey(){
     const prefix = "PHONG-TUS-";
     const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
@@ -172,43 +89,20 @@ function generateUniqueKey(){
     return k;
 }
 
-/* ---------- Time (optional) ---------- */
+/* ---------- Time display ---------- */
 function updateTime(){
     const now = new Date();
+    const hh = String(now.getHours()).padStart(2,'0');
+    const mm = String(now.getMinutes()).padStart(2,'0');
+    const ss = String(now.getSeconds()).padStart(2,'0');
     const d = now.getDate(), m = now.getMonth()+1, y = now.getFullYear();
+    document.getElementById('clock').textContent = `${hh}:${mm}:${ss}`;
+    document.getElementById('dateDisplay').textContent = `Hôm nay là ngày ${d}/${m}/${y}`;
     document.title = `Key Ngày ${d}/${m}/${y} Là`;
+    setTimeout(updateTime, 1000);
 }
 
-/* ---------- Access control ---------- */
-function checkAllowedAccess(){
-    const params = new URLSearchParams(window.location.search);
-    const ma = params.get('ma');
-    const getkey = params.get('getkey');
-    const ref = document.referrer || '';
-
-    const allowedHosts = ['link4m.co','link4m.vn','link4m.com','l.link4m.co','link4m'];
-    const hasAllowedRef = allowedHosts.some(h => (ref||'').includes(h));
-
-    if (ma || getkey === '1' || hasAllowedRef) return true;
-    return false;
-}
-
-/* ---------- Show / hide down overlay ---------- */
-function showSiteDown(){
-    document.getElementById('downOverlay').style.display = 'flex';
-    document.getElementById('mainContainer').style.filter = 'blur(4px)';
-    // disable main buttons
-    document.getElementById('copyButton').disabled = true;
-    document.getElementById('musicButton').disabled = true;
-}
-function hideSiteDown(){
-    document.getElementById('downOverlay').style.display = 'none';
-    document.getElementById('mainContainer').style.filter = 'none';
-    document.getElementById('copyButton').disabled = false;
-    document.getElementById('musicButton').disabled = false;
-}
-
-/* ---------- Fill key if allowed ---------- */
+/* ---------- Handle URL params to fill key ---------- */
 function handleQueryParams(){
     const params = new URLSearchParams(window.location.search);
     const ma = params.get('ma');
@@ -218,59 +112,156 @@ function handleQueryParams(){
     if(getkey === '1'){
         const newKey = generateUniqueKey();
         keyInput.value = newKey;
-        markKeyAsUsed(newKey);
+        markKeyAsUsed(newKey); // nếu bạn muốn đánh dấu ngay khi tạo
+        console.log('Đã tạo key mới:', newKey);
     } else if(ma){
         keyInput.value = ma;
     } else {
-        keyInput.value = generateRandomKey();
+        keyInput.value = generateRandomKey(); // mẫu
     }
 }
 
-/* ---------- Copy button ---------- */
+/* ---------- Copy + play music on copy ---------- */
 const copyBtn = document.getElementById('copyButton');
-copyBtn.addEventListener('click', async function(){
-    const key = document.getElementById('keyInput').value || '';
+copyBtn.addEventListener('click', copyToClipboard);
+
+async function copyToClipboard(){
+    const keyInput = document.getElementById('keyInput');
+    const key = keyInput.value || '';
     if(!key) return;
-    try { await navigator.clipboard.writeText(key); }
-    catch(e){ document.getElementById('keyInput').select(); document.execCommand('copy'); }
-    const orig = copyBtn.textContent;
-    copyBtn.textContent = '✅ Đã copy!';
-    setTimeout(()=> copyBtn.textContent = orig, 1800);
-    markKeyAsUsed(key);
-});
 
-/* ---------- Music button (kept minimal: will not auto-play) ---------- */
-const musicBtn = document.getElementById('musicButton');
-musicBtn.addEventListener('click', function(){
-    alert('Tính năng phát nhạc đã giữ để tương thích. Nếu muốn auto-play thì cần sự tương tác người dùng trên một số trình duyệt.');
-});
-
-/* ---------- Overlay buttons ---------- */
-document.addEventListener('DOMContentLoaded', function(){
-    updateTime();
-
-    // kiểm tra truy cập
-    if (!checkAllowedAccess()){
-        // show full site-down UI
-        showSiteDown();
-    } else {
-        handleQueryParams();
+    // modern clipboard API
+    try {
+        await navigator.clipboard.writeText(key);
+    } catch (e) {
+        // fallback
+        keyInput.select();
+        document.execCommand('copy');
     }
 
-    document.getElementById('downRetryBtn').addEventListener('click', function(){
-        // thử lại: nếu checkAllowedAccess pass thì ẩn overlay, nếu không reload để cập nhật referrer
-        if (checkAllowedAccess()){
-            hideSiteDown();
-            handleQueryParams();
-        } else {
-            // reload để thử cập nhật referrer hoặc sau thay đổi link
-            location.reload();
+    // feedback button text
+    const originalText = copyBtn.textContent;
+    copyBtn.textContent = '✅ Đã copy!';
+    setTimeout(()=> copyBtn.textContent = originalText, 2000);
+
+    // mark as used (optional - depending on logic)
+    markKeyAsUsed(key);
+
+    // start youtube music (if ready)
+    if (typeof ytPlayer !== 'undefined' && ytPlayerReady) {
+        // restart track from start
+        try {
+            ytPlayer.seekTo(0);
+            ytPlayer.playVideo();
+            musicButtonUpdateState(true);
+        } catch(err) {
+            console.warn('Không thể play youtube player:', err);
+        }
+    } else {
+        // if youtube API chưa sẵn sàng, cố gắng tạo player ngay bây giờ (sẽ play khi onReady gọi)
+        if (!ytPlayerInitializing) {
+            initYouTubePlayer(); // khởi tạo lần cuối nếu chưa
+        }
+        // lưu cờ yêu cầu phát khi ready
+        playWhenReady = true;
+    }
+}
+
+/* ---------- YouTube Player API integration ---------- */
+/* Sử dụng video ID từ YouTube link bạn gửi: UKox4YEvLpg */
+let ytPlayer;
+let ytPlayerReady = false;
+let ytPlayerInitializing = false;
+let playWhenReady = false;
+const YT_VIDEO_ID = 'UKox4YEvLpg'; // đổi nếu cần
+// tải API
+function initYouTubePlayer(){
+    if (ytPlayerInitializing || typeof YT !== 'undefined' && ytPlayer) return;
+    ytPlayerInitializing = true;
+    // inject YT iframe api script if not present
+    if (!document.getElementById('yt-iframe-api')) {
+        const tag = document.createElement('script');
+        tag.id = 'yt-iframe-api';
+        tag.src = "https://www.youtube.com/iframe_api";
+        document.head.appendChild(tag);
+    }
+    // onYouTubeIframeAPIReady sẽ được gọi bởi API khi script load
+}
+
+// API callback (YouTube yêu cầu hàm toàn cục)
+function onYouTubeIframeAPIReady(){
+    ytPlayer = new YT.Player('player', {
+        height: '0',
+        width: '0',
+        videoId: YT_VIDEO_ID,
+        playerVars: {
+            autoplay: 0,
+            controls: 0,
+            rel: 0,
+            modestbranding: 1,
+            playsinline: 1
+        },
+        events: {
+            'onReady': function(e){
+                ytPlayerReady = true;
+                ytPlayerInitializing = false;
+                // đặt volume mặc định (0-100)
+                try { ytPlayer.setVolume(60); } catch(e){}
+                if (playWhenReady) {
+                    ytPlayer.seekTo(0);
+                    ytPlayer.playVideo();
+                    playWhenReady = false;
+                    musicButtonUpdateState(true);
+                }
+            },
+            'onStateChange': function(event){
+                // state change handler nếu cần
+                // 0 = ended
+                if (event.data === 0) {
+                    // khi bài kết thúc, cập nhật nút
+                    musicButtonUpdateState(false);
+                }
+            }
         }
     });
+}
 
-    document.getElementById('downOpenGuideBtn').addEventListener('click', function(){
-        window.open('https://caoquy2k3.github.io/Phong-tus/','_blank');
-    });
+/* ---------- Music toggle button ---------- */
+const musicBtn = document.getElementById('musicButton');
+musicBtn.addEventListener('click', toggleMusic);
+
+function toggleMusic(){
+    if (typeof ytPlayer !== 'undefined' && ytPlayerReady) {
+        const state = ytPlayer.getPlayerState();
+        // player states: -1 unstarted, 0 ended, 1 playing, 2 paused
+        if (state === 1) {
+            ytPlayer.pauseVideo(); musicButtonUpdateState(false);
+        } else {
+            ytPlayer.playVideo(); musicButtonUpdateState(true);
+        }
+    } else {
+        // if not ready, initialize (will play automatically if user just clicked)
+        initYouTubePlayer();
+        // request to play when ready
+        playWhenReady = true;
+        // change button to show pending play
+        musicButtonUpdateState(true, '...Loading');
+    }
+}
+
+function musicButtonUpdateState(isPlaying, overrideText){
+    if (overrideText) {
+        musicBtn.textContent = '⏳ ' + overrideText;
+        return;
+    }
+    musicBtn.textContent = isPlaying ? '⏸️ Pause Music' : '▶️ Play Music';
+}
+
+/* ---------- Init ---------- */
+window.addEventListener('load', function(){
+    updateTime();
+    handleQueryParams();
+    initYouTubePlayer(); // khởi động sớm (không autoplay) để sẵn sàng khi người dùng copy
 });
 </script>
 </body>
