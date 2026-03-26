@@ -14,20 +14,24 @@ from logging.handlers import RotatingFileHandler
 import re
 from difflib import SequenceMatcher
 import hashlib
+import threading
 from rich.console import Console
 from rich.table import Table
-from rich.live import Live
-from rich import box
-from rich.layout import Layout
 from rich.panel import Panel
-from rich.text import Text
-from rich.columns import Columns
-from rich.style import Style
 from rich.align import Align
+from rich.live import Live
+from rich.layout import Layout
+from rich import box
+from rich.text import Text
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from adbutils import adb
+import cv2
+import numpy as np
+import urllib.request
 
-# Cấu hình UTF-8 cho terminal
-if hasattr(sys.stdout, 'reconfigure'):
-    sys.stdout.reconfigure(encoding='utf-8')
+# Tạo thư mục data nếu chưa tồn tại
+DATA_DIR = "data"
+os.makedirs(DATA_DIR, exist_ok=True)
 
 # Cấu hình múi giờ
 os.environ['TZ'] = 'Asia/Ho_Chi_Minh'
@@ -41,82 +45,724 @@ device = None
 device_serial = None
 TIKTOK_PACKAGE = "com.ss.android.ugc.trill"
 INSTANCE_ID = None
+account_id = None
+base_delay = 5
+delay_variation = 2
 
-# Định nghĩa các file
-AUTH_FILE = "Authorization.txt"
-LINK_JOB_FILE = "link_job.txt"
-LOG_FILE = "log_phongtus.txt"
-CHECK_CMT_FILE = "check_cmt.txt"
+# Định nghĩa các file (sẽ được đặt trong thư mục data)
+AUTH_FILE = os.path.join(DATA_DIR, "Authorization.json")
+LINK_JOB_FILE = None  # Sẽ được khởi tạo sau với device serial
+LOG_FILE = None  # Sẽ được khởi tạo sau với device serial
+CHECK_CMT_FILE = None  # Sẽ được khởi tạo sau với device serial
+CONFIG_FILE = os.path.join(DATA_DIR, "config.json")
 
 SIMILARITY_THRESHOLD = 0.85
 MIN_FOLLOW_PRICE = 0
+FORCE_STOP_ENABLED = False
+FORCE_STOP_AFTER = 0
+job_count = 0
 
-# Biến cấu hình cho chế độ follow
-FOLLOW_MODE = 1  # 1: Mở qua link (package), 2: Mở bằng tìm kiếm username
-
-# ===== CẤU HÌNH FORCE STOP =====
-FORCE_STOP_BEFORE_RUN = True   # Bật/tắt buộc dừng trước khi chạy
-FORCE_STOP_EVERY_JOB = 20      # Sau bao nhiêu job thì buộc dừng app TikTok
+# Biến cấu hình delay mới
+delay_config = {
+    'like': [5, 5],
+    'follow': [5, 5],
+    'comment': [5, 5],
+    'favorite': [5, 5],
+    'job': [5, 5],
+    'delay_done': 9,
+    'loc_follow': 0
+}
 
 logger = None
 console = Console()
 
-# --- CẤU TRÚC accounts_data ---
+# --- CẤU TRÚC accounts_data cho dashboard ---
 accounts_data = {}
 
-def get_video_id(link):
-    """
-    Extract video ID từ link TikTok
-    Ưu tiên lấy ID từ pattern /video/ID
-    Nếu không có thì dùng MD5 của link để tránh trùng
-    """
+# Lock cho thread safety
+dashboard_lock = threading.Lock()
+
+# Lưu thông tin các Authorization
+auth_accounts = []  # List of dict: {"auth": token, "username": name, "coin": coin, "success": bool}
+
+# Danh sách nhiệm vụ và màu sắc cho menu chọn
+JOBS = [
+    {"id": "like", "name": "Like", "color": "#ff9ecb"},
+    {"id": "follow", "name": "Follow", "color": "#ffd54f"},
+    {"id": "comment", "name": "Comment", "color": "#00ffff"},
+    {"id": "favorite", "name": "Favorite", "color": "#a78bfa"}
+]
+
+
+def banner():
+    os.system('clear' if os.name == 'posix' else 'cls')
+    banner_text = """
+      \033[38;2;153;51;255m▄▄▄█████▓ █    ██   ██████    ▄▄▄█████▓ ▒█████   ▒█████   ██▓
+      \033[38;2;170;70;255m▓  ██▒ ▓▒ ██  ▓██▒▒██    ▒    ▓  ██▒ ▓▒▒██▒  ██▒▒██▒  ██▒▓██▒
+      \033[38;2;190;90;255m▒ ▓██░ ▒░▓██  ▒██░░ ▓██▄      ▒ ▓██░ ▒░▒██░  ██▒▒██░  ██▒▒██░
+      \033[38;2;210;110;240m░ ▓██▓ ░ ▓▓█  ░██░  ▒   ██▒   ░ ▓██▓ ░ ▒██   ██░▒██   ██░▒██░
+      \033[38;2;230;130;220m  ▒██▒ ░ ▒▒█████▓ ▒██████▒▒     ▒██▒ ░ ░ ████▓▒░░ ████▓▒░░██████▒
+      \033[38;2;240;150;200m  ▒ ░░   ░▒▓▒ ▒ ▒ ▒ ▒▓▒ ▒ ░     ▒ ░░   ░ ▒░▒░▒░ ░ ▒░▒░▒░ ░ ▒░▓  ░
+      \033[38;2;200;200;255m    ░    ░░▒░ ░ ░ ░ ░▒  ░ ░       ░      ░ ▒ ▒░   ░ ▒ ▒░ ░ ░ ▒  ░
+      \033[38;2;150;230;255m  ░       ░░░ ░ ░ ░  ░  ░       ░      ░ ░ ░ ▒  ░ ░ ░ ▒    ░ ░
+      \033[38;2;120;255;230m            ░           ░                  ░ ░      ░ ░      ░  ░
+\033[0m
+\033[38;2;255;200;140m[\033[38;2;245;245;245m</>\033[38;2;255;200;140m] \033[38;2;200;160;255mADMIN:\033[38;2;255;235;180m NHƯ ANH ĐÃ THẤY EM   \033[38;2;255;220;160mPhiên Bản: \033[38;2;120;255;220mv3.0
+\033[38;2;255;200;140m[\033[38;2;245;245;245m</>\033[38;2;255;200;140m] \033[38;2;200;160;255mNhóm Telegram: \033[38;2;120;255;220mhttps://t.me/se_meo_bao_an
+\033[38;2;190;235;210m───────────────────────────────────────────────────────────────────────\033[0m
+"""
+    print(banner_text)
+
+
+
+def check_and_download_gui():
+    """Kiểm tra và tải gui.png về đúng thư mục chứa file code"""
+    # Lấy đường dẫn thư mục gốc nơi đang chứa file tool (ttnew2.py)
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    gui_path = os.path.join(current_dir, "gui.png")
+    
+    # Kiểm tra xem ảnh đã tồn tại chưa
+    if not os.path.exists(gui_path):
+        job("Chưa có file gui.png, đang tự động tải về thư mục tool...")
+        url = "https://raw.githubusercontent.com/Caoquy2k3/Phong-tus/refs/heads/main/gui.png" 
+        try:
+            # Tải ảnh từ link Raw và lưu thẳng vào thư mục tool
+            urllib.request.urlretrieve(url, gui_path)
+            job(f"✓ Đã tải gui.png thành công tại: {gui_path}")
+        except Exception as e:
+            job(f"✗ Lỗi tải ảnh: {str(e)}")
+            
+    return gui_path
+
+
+def load_config():
+    """Tải cấu hình từ file JSON"""
+    global delay_config, MIN_FOLLOW_PRICE, FORCE_STOP_ENABLED, FORCE_STOP_AFTER
+    
+    if os.path.exists(CONFIG_FILE):
+        try:
+            with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
+                config = json.load(f)
+                
+            delay_config = config.get('delay_config', delay_config)
+            MIN_FOLLOW_PRICE = config.get('min_follow_price', MIN_FOLLOW_PRICE)
+            FORCE_STOP_ENABLED = config.get('force_stop_enabled', FORCE_STOP_ENABLED)
+            FORCE_STOP_AFTER = config.get('force_stop_after', FORCE_STOP_AFTER)
+            
+            console.print("[green]✓ Đã tải cấu hình từ file[/]")
+            return True
+        except Exception as e:
+            console.print(f"[yellow]⚠ Không thể tải cấu hình: {e}[/]")
+            return False
+    return False
+
+
+def save_config():
+    """Lưu cấu hình vào file JSON"""
     try:
-        # Pattern cho link dạng: /video/1234567890
+        config = {
+            'delay_config': delay_config,
+            'min_follow_price': MIN_FOLLOW_PRICE,
+            'force_stop_enabled': FORCE_STOP_ENABLED,
+            'force_stop_after': FORCE_STOP_AFTER
+        }
+        
+        with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
+            json.dump(config, f, ensure_ascii=False, indent=2)
+        
+        return True
+    except Exception as e:
+        console.print(f"[red]Lỗi lưu cấu hình: {e}[/]")
+        return False
+
+
+def input_number(text, default):
+    """Nhập số với giá trị mặc định"""
+    while True:
+        try:
+            value = input(text).strip()
+            if value == "":
+                return default
+            return int(value)
+        except:
+            console.print("[bold #ff4d6d]Sai định dạng! Nhập số.[/]")
+
+
+def setup_delay_config():
+    """Cấu hình delay với giao diện đẹp"""
+    global delay_config, MIN_FOLLOW_PRICE, FORCE_STOP_ENABLED, FORCE_STOP_AFTER
+    
+    delay_like = [delay_config['like'][0], delay_config['like'][1]]
+    delay_follow = [delay_config['follow'][0], delay_config['follow'][1]]
+    delay_comment = [delay_config['comment'][0], delay_config['comment'][1]]
+    delay_job = [delay_config['job'][0], delay_config['job'][1]]
+    delay_fav = [delay_config['favorite'][0], delay_config['favorite'][1]]
+
+    loc_follow = delay_config['loc_follow']
+    delay_done = delay_config['delay_done']
+    force_stop = "Yes" if FORCE_STOP_ENABLED else "No"
+    stop_job = FORCE_STOP_AFTER
+
+    while True:
+        table = Table(
+            title="[#ffffff]Delay [#00ffff]Config[/]",
+            box=box.SQUARE,
+            border_style="#ff9ecb",
+            show_lines=True,
+            pad_edge=False
+        )
+
+        table.add_column("Name", justify="left", header_style="#ff9ecb")
+        table.add_column("Min", justify="center", header_style="#ffffff")
+        table.add_column("Max", justify="center", header_style="#00ffff")
+
+        # ===== MIX MÀU MỖI ROW =====
+        def row(name, val, c1, c2, c3):
+            return [
+                f"[bold {c1}]{name}[/]",
+                f"[bold {c2}]{val[0]}[/][#aaaaaa]s[/]",
+                f"[bold {c3}]{val[1]}[/][#aaaaaa]s[/]"
+            ]
+
+        table.add_row(*row("Delay Like", delay_like, "#ff4d6d", "#ffd1dc", "#ff8fa3"))
+        table.add_row(*row("Delay Follow", delay_follow, "#00c853", "#b9f6ca", "#69f0ae"))
+        table.add_row(*row("Delay Comment", delay_comment, "#00b0ff", "#80d8ff", "#40c4ff"))
+        table.add_row(*row("Delay Get Jobs", delay_job, "#ff9100", "#ffd180", "#ffab40"))
+        table.add_row(*row("Delay Favorite", delay_fav, "#a78bfa", "#c4b5fd", "#b388ff"))
+
+        table.add_row(
+            "[#ff9ecb]Lọc Follow[/]",
+            f"[#ffffff]{loc_follow}[/]",
+            "[#00ffff]ON/OFF[/]"
+        )
+
+        table.add_row(
+            "[#ffd54f]Delay Hoàn Thành[/]",
+            f"[bold #ffffff]{delay_done}[/]",
+            "[#00ffff]s[/]"
+        )
+
+        table.add_row(
+            "[#ff4d6d]Buộc Dừng chạy[/]",
+            f"[#ffffff]{force_stop}[/]",
+            "[#aaaaaa]-[/]"
+        )
+
+        table.add_row(
+            "[#00b0ff]Số Job Buộc dừng[/]",
+            f"[bold #ffffff]{stop_job}[/]",
+            "[#aaaaaa]-[/]"
+        )
+
+        console.clear()
+        console.print(table)
+
+        console.print(
+            "\n[#ff9ecb]➤ [#ffffff]Dùng lại config?[/] [#00ffff](Y/N)[/] ()[#ffffff]:",
+            end=""
+        )
+        choice = input().strip().lower()
+
+        if choice != "n":
+            console.print("[#00ff9c] Giữ config hiện tại[/]")
+            break
+
+        console.print("\n[bold #ffd54f] Nhập lại cấu hình[/]\n")
+
+        delay_like = [
+            input_number("Delay Like Min: ", delay_like[0]),
+            input_number("Delay Like Max: ", delay_like[1])
+        ]
+
+        delay_follow = [
+            input_number("Delay Follow Min: ", delay_follow[0]),
+            input_number("Delay Follow Max: ", delay_follow[1])
+        ]
+
+        delay_comment = [
+            input_number("Delay Comment Min: ", delay_comment[0]),
+            input_number("Delay Comment Max: ", delay_comment[1])
+        ]
+
+        delay_job = [
+            input_number("Delay Get Jobs Min: ", delay_job[0]),
+            input_number("Delay Get Jobs Max: ", delay_job[1])
+        ]
+
+        delay_fav = [
+            input_number("Delay Favorite Min: ", delay_fav[0]),
+            input_number("Delay Favorite Max: ", delay_fav[1])
+        ]
+
+        loc_follow = input_number("Lọc Follow (0 = OFF): ", loc_follow)
+        delay_done = input_number("Delay Hoàn Thành: ", delay_done)
+
+        force_stop_input = input("Buộc dừng chạy (y/n): ").strip().lower()
+        force_stop = "Yes" if force_stop_input == "y" else "No"
+        stop_job = input_number("Số job buộc dừng: ", stop_job)
+
+    # Lưu cấu hình vào biến toàn cục
+    delay_config['like'] = delay_like
+    delay_config['follow'] = delay_follow
+    delay_config['comment'] = delay_comment
+    delay_config['job'] = delay_job
+    delay_config['favorite'] = delay_fav
+    delay_config['loc_follow'] = loc_follow
+    delay_config['delay_done'] = delay_done
+    
+    MIN_FOLLOW_PRICE = loc_follow
+    FORCE_STOP_ENABLED = (force_stop == "Yes")
+    FORCE_STOP_AFTER = stop_job
+    
+    # Lưu cấu hình vào file
+    save_config()
+    
+    return True
+
+
+def get_random_delay_job(job_type):
+    """Trả về delay ngẫu nhiên cho từng loại job"""
+    if job_type in delay_config:
+        min_delay, max_delay = delay_config[job_type]
+        return random.randint(min_delay, max_delay)
+    return random.randint(3, 7)
+
+
+def get_random_delay():
+    """Trả về delay ngẫu nhiên (giữ lại cho tương thích)"""
+    return get_random_delay_job('job')
+
+
+def render_tablet(selections, current_idx):
+    """Vẽ khung Tablet (Bảng bo tròn góc) cho menu chọn nhiệm vụ"""
+    table = Table(
+        box=box.ROUNDED, 
+        border_style="#d7b8ff", 
+        header_style="bold #ffffff",
+        width=45,
+        title="[bold #ff9ecb]📋 CHỌN NHIỆM VỤ[/]"
+    )
+    
+    table.add_column("STT", justify="center", style="bold", width=5)
+    table.add_column("Nhiệm Vụ", width=15)
+    table.add_column("Trạng Thái", justify="center", width=12)
+
+    for i, job in enumerate(JOBS):
+        color = job["color"]
+        
+        # Cập nhật trạng thái
+        if selections[i] == 'y':
+            status = "[bold #00ff9c]✓ Đã chọn[/]"
+        elif selections[i] == 'n':
+            status = "[bold #ff4d6d]✗ Bỏ qua[/]"
+        elif i == current_idx:
+            status = "[blink bold #ffff00]⏳ Đang chờ...[/]"
+        else:
+            status = "[dim]⏳ Chưa chọn[/]"
+
+        table.add_row(
+            f"[{color}]{i+1}[/]",
+            f"[{color}]{job['name']}[/]",
+            status
+        )
+        
+    return table
+
+
+def menu_jobs():
+    """Menu chọn nhiệm vụ với giao diện đẹp"""
+    selections = [None] * len(JOBS)
+    
+    console.clear()
+    console.print(Panel("[bold cyan]🔧 CẤU HÌNH NHIỆM VỤ[/]", border_style="#ff9ecb", width=50))
+    console.print()
+    
+    # Lặp qua từng nhiệm vụ để hỏi
+    for i, job in enumerate(JOBS):
+        while True:
+            console.clear()
+            console.print(render_tablet(selections, i))
+            
+            ans = console.input(f"\n[#ff9ecb]➤ [#ffffff]Bạn có muốn làm nhiệm vụ [bold]{job['name']}[/] không? (y/n) [y]: [/]").strip().lower()
+            
+            if ans in ['y', 'yes', '']:
+                selections[i] = 'y'
+                break
+            elif ans in ['n', 'no']:
+                selections[i] = 'n'
+                break
+            else:
+                console.print("[red]✗ Vui lòng nhập y hoặc n![/]", style="red")
+                time.sleep(1)
+
+    # Kết quả sau khi chọn xong
+    console.clear()
+    console.print(render_tablet(selections, -1))
+    
+    # Lọc ra các ID đã chọn Y
+    selected_jobs = [JOBS[i]["id"] for i in range(len(JOBS)) if selections[i] == 'y']
+    
+    if selected_jobs:
+        console.print(f"\n[#ffffff]📌 Nhiệm vụ đã chọn:[/] [bold #00ffff]{', '.join(job['name'] for job in JOBS if job['id'] in selected_jobs)}[/]")
+        console.print(f"[#00ff9c]➤ Sẽ thực hiện {len(selected_jobs)} nhiệm vụ[/]\n")
+    else:
+        console.print("\n[#ff4d6d]⚠ Không có nhiệm vụ nào được chọn! Tool sẽ thoát.[/]")
+        sys.exit(1)
+    
+    return selected_jobs
+
+
+def get_device_model_from_adb(device_obj):
+    """Lấy model thực từ thiết bị qua adbutils"""
+    try:
+        return device_obj.shell("getprop ro.product.model").strip()
+    except:
+        return "Unknown"
+
+
+def get_battery_from_adb(device_obj):
+    """Lấy % pin thực từ thiết bị qua adbutils"""
+    try:
+        info = device_obj.shell("dumpsys battery")
+        for line in info.splitlines():
+            if "level" in line:
+                return line.split(":")[1].strip()
+    except:
+        pass
+    return ""
+
+
+def show_devices_with_rich():
+    """Hiển thị danh sách thiết bị với Rich Table"""
+    console.clear()
+    
+    table = Table(
+        title="[bold #ffffff]📱 DANH SÁCH THIẾT BỊ ADB[/]",
+        border_style="#d7d7a8",
+        show_lines=True,
+        expand=False,
+        title_justify="center"
+    )
+
+    table.add_column("STT", justify="center", style="#e0e0e0", width=5)
+    table.add_column("Device ID", style="#00ff9c", width=25)
+    table.add_column("Product Model", style="#ffd54f", width=20)
+    table.add_column("🔋 Battery", justify="center", width=12)
+    table.add_column("Status", style="#00ff99", width=10)
+
+    devices = adb.device_list()
+
+    if not devices:
+        console.print(Panel("[red]Không tìm thấy thiết bị ADB nào![/]", border_style="red"))
+        return []
+
+    for i, d in enumerate(devices):
+        model = get_device_model_from_adb(d)
+        battery = get_battery_from_adb(d)
+        
+        if battery:
+            try:
+                b = int(battery)
+                if b >= 80:
+                    battery_display = f"[bold green]█[/bold green]" * (b // 10) + f"[green]{b}%[/green]"
+                elif b >= 50:
+                    battery_display = f"[bold yellow]█[/bold yellow]" * (b // 10) + f"[yellow]{b}%[/yellow]"
+                elif b >= 20:
+                    battery_display = f"[bold orange1]█[/bold orange1]" * (b // 10) + f"[orange1]{b}%[/orange1]"
+                else:
+                    battery_display = f"[bold red]█[/bold red]" * (b // 10) + f"[red]{b}%[/red]"
+            except:
+                battery_display = f"[cyan]{battery}%[/cyan]"
+        else:
+            battery_display = "[dim]N/A[/dim]"
+
+        table.add_row(
+            str(i + 1),
+            f"[#00ff9c]{d.serial}[/]",
+            f"[#ffd54f]{model}[/]",
+            battery_display,
+            "[#00ff99]● Online[/]"
+        )
+
+    console.print(table)
+    console.print()
+    
+    return devices
+
+
+def get_adb_devices_new():
+    """Lấy danh sách thiết bị từ adbutils"""
+    devices = show_devices_with_rich()
+    if not devices:
+        return []
+    
+    return [d.serial for d in devices]
+
+
+def get_status_color(status):
+    """Trả về màu sắc dựa trên trạng thái"""
+    status_lower = status.lower()
+    if "đợi" in status_lower or "chờ" in status_lower or "đang chờ" in status_lower:
+        return "yellow"
+    elif "follow" in status_lower or "theo dõi" in status_lower:
+        return "blue"
+    elif "like" in status_lower or "thích" in status_lower:
+        return "magenta"
+    elif "comment" in status_lower or "bình luận" in status_lower:
+        return "cyan"
+    elif "favorite" in status_lower or "yêu thích" in status_lower:
+        return "pink1"
+    elif "hoàn thành" in status_lower or "thành công" in status_lower:
+        return "green"
+    elif "thất bại" in status_lower or "bỏ qua" in status_lower or "skip" in status_lower:
+        return "red"
+    elif "tìm nhiệm vụ" in status_lower:
+        return "bright_black"
+    elif "force stop" in status_lower or "buộc dừng" in status_lower:
+        return "orange1"
+    elif "bạn đã làm" in status_lower or "hết hạn" in status_lower or "hạn chế" in status_lower:
+        return "red"
+    else:
+        return "white"
+
+
+def build_table():
+    """Xây dựng bảng dashboard với màu sắc theo trạng thái"""
+    table = Table(show_header=True, header_style="bold magenta", box=box.ROUNDED)
+    
+    table.add_column("Device ID", style="bright_yellow", width=20)
+    table.add_column("ID TikTok", style="bright_yellow", width=15)
+    table.add_column("Status", style="white", width=22)
+    table.add_column("Type Job", style="cyan", width=10)
+    table.add_column("Xu", style="yellow", width=8)
+    table.add_column("Tổng Xu", style="yellow", width=10)
+    table.add_column("Done", style="green", width=8)
+    table.add_column("Fail", style="red", width=8)
+    
+    with dashboard_lock:
+        for acc_id, data in accounts_data.items():
+            status = str(data.get("status", "Đang chờ..."))
+            status_color = get_status_color(status)
+            
+            table.add_row(
+                str(device_serial if device_serial else "N/A"),
+                str(data.get("username", "?")),
+                f"[{status_color}]{status}[/{status_color}]",
+                str(data.get("job_type", "-")),
+                str(data.get("xu", 0)),
+                f"[yellow]{data.get('total_xu', 0)}[/yellow]",
+                f"[green]{data.get('done', 0)}[/green]",
+                f"[red]{data.get('fail', 0)}[/red]"
+            )
+    
+    return table
+
+
+def make_stats():
+    """Tạo panel thống kê tổng hợp với 4 panel nhỏ nằm ngang"""
+    with dashboard_lock:
+        total_xu = sum(d.get("total_xu", 0) for d in accounts_data.values())
+        total_done = sum(d.get("done", 0) for d in accounts_data.values())
+        total_fail = sum(d.get("fail", 0) for d in accounts_data.values())
+        total_devices = len(accounts_data)
+    
+    stats = Table.grid(expand=False, pad_edge=True)
+    stats.add_row(
+        Panel(f"[yellow]Tổng Xu : {total_xu}[/yellow]", width=15, style="bright_blue", box=box.ROUNDED),
+        Panel(f"[cyan]Thiết bị : {total_devices}[/cyan]", width=15, style="bright_blue", box=box.ROUNDED),
+        Panel(f"[green]Job Done : {total_done}[/green]", width=15, style="bright_blue", box=box.ROUNDED),
+        Panel(f"[red]Job Fail : {total_fail}[/red]", width=15, style="bright_blue", box=box.ROUNDED),
+    )
+    
+    return stats
+
+
+def make_link_panel():
+    """Tạo panel hiển thị link job hiện tại"""
+    with dashboard_lock:
+        if accounts_data:
+            first_device = list(accounts_data.values())[0]
+            link = first_device.get("link", "Chưa có job")
+        else:
+            link = "Chưa có job"
+    
+    link_display = link
+    if len(link) > 65:
+        parts = []
+        for i in range(0, len(link), 65):
+            parts.append(link[i:i+65])
+        link_display = "\n".join(parts)
+    
+    return Panel(
+        Align.left(Text(link_display, style="bold cyan")),
+        title="[bold green]🔗 LINK JOB HIỆN TẠI[/bold green]",
+        border_style="bright_yellow",
+        box=box.ROUNDED,
+        width=72,
+        expand=False
+    )
+
+
+def make_layout():
+    """Tạo layout dashboard"""
+    layout = Layout()
+    
+    layout.split(
+        Layout(name="title", size=3),
+        Layout(name="stats", size=5),
+        Layout(name="link", size=5),
+        Layout(name="table")
+    )
+    
+    layout["title"].update(
+        Align.center(
+            Panel(
+                "[bold cyan]TOOL GOLIKE TIKTOK BOXPHONE - BY: DAO CAO NGUYEN[/bold cyan]",
+                style="bright_yellow",
+                box=box.DOUBLE
+            )
+        )
+    )
+    
+    layout["stats"].update(Align.center(make_stats()))
+    layout["link"].update(Align.center(make_link_panel()))
+    layout["table"].update(build_table())
+    
+    return layout
+
+
+def run_dashboard():
+    """Chạy dashboard riêng trong thread với refresh định kỳ"""
+    with Live(
+        make_layout(),
+        refresh_per_second=2,
+        screen=True,
+        auto_refresh=True
+    ) as live:
+        while True:
+            try:
+                time.sleep(0.5)
+                live.update(make_layout())
+            except Exception as e:
+                if logger:
+                    logger.error(f"Dashboard refresh error: {e}")
+                time.sleep(1)
+
+
+def init_account_data(account_id_val, username):
+    """Khởi tạo dữ liệu account cho dashboard"""
+    with dashboard_lock:
+        if account_id_val not in accounts_data:
+            accounts_data[account_id_val] = {
+                "username": username,
+                "status": "Đang chờ...",
+                "job_type": "",
+                "xu": 0,
+                "total_xu": 0,
+                "done": 0,
+                "fail": 0,
+                "link": ""
+            }
+
+
+def update_account_stats(account_id_val, job_type=None, coin=0, success=True):
+    """Cập nhật thống kê cho account"""
+    with dashboard_lock:
+        if account_id_val not in accounts_data:
+            return
+        
+        if success:
+            accounts_data[account_id_val]["done"] += 1
+            accounts_data[account_id_val]["total_xu"] += coin
+            accounts_data[account_id_val]["xu"] = coin
+            if job_type:
+                accounts_data[account_id_val]["job_type"] = job_type
+        else:
+            accounts_data[account_id_val]["fail"] += 1
+            if job_type:
+                accounts_data[account_id_val]["job_type"] = job_type
+
+
+def update_account_status(account_id_val, status):
+    """Cập nhật trạng thái account"""
+    with dashboard_lock:
+        if account_id_val in accounts_data:
+            accounts_data[account_id_val]["status"] = status
+
+
+def update_current_link(account_id_val, link):
+    """Cập nhật link hiện tại"""
+    with dashboard_lock:
+        if account_id_val in accounts_data:
+            accounts_data[account_id_val]["link"] = link
+
+
+def get_video_id(link):
+    """Extract video ID từ link TikTok"""
+    try:
         match = re.search(r'/video/(\d+)', link)
         if match:
             return match.group(1)
         
-        # Pattern cho link dạng vt.tiktok.com (short link)
         match = re.search(r'tiktok\.com/(?:@[^/]+/video/|video/|)(\d+)', link)
         if match:
             return match.group(1)
         
-        # Fallback: dùng MD5 của link nếu không extract được ID
         return hashlib.md5(link.encode()).hexdigest()[:10]
     except Exception as e:
         if logger:
             logger.error(f"Lỗi extract video_id từ {link}: {str(e)}")
         return link
 
+
 def save_link_job(link, job_type, status, price):
-    """Lưu video_id thay vì full link"""
+    """Lưu video_id vào file JSON để check trùng (chỉ lưu ID đã xử lý thành công)"""
     try:
         video_id = get_video_id(link)
+        
+        # Chỉ lưu nếu thành công
+        if status != "thành công":
+            return False
+        
+        # Đọc file hiện tại nếu có
+        data = {}
+        if os.path.exists(LINK_JOB_FILE):
+            with open(LINK_JOB_FILE, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+        
+        # Lưu video_id đã xử lý thành công
+        if "processed_videos" not in data:
+            data["processed_videos"] = []
+        
+        if video_id not in data["processed_videos"]:
+            data["processed_videos"].append(video_id)
+        
+        # Lưu lại
         with open(LINK_JOB_FILE, 'w', encoding='utf-8') as f:
-            f.write(f"{video_id}\n")
+            json.dump(data, f, ensure_ascii=False, indent=2)
+        
         if logger:
-            logger.info(f"Đã lưu video_id: {video_id} cho job {job_type}")
+            logger.info(f"Đã lưu video_id: {video_id} vào danh sách đã xử lý")
         return True
     except Exception as e:
         if logger:
             logger.error(f"Lỗi lưu video_id: {str(e)}")
         return False
 
+
 def is_link_processed(link):
-    """
-    Kiểm tra link đã làm chưa bằng cách so sánh video_id
-    Thay vì so sánh full link
-    """
+    """Kiểm tra link đã xử lý thành công chưa"""
     try:
         video_id = get_video_id(link)
         
         if os.path.exists(LINK_JOB_FILE):
             with open(LINK_JOB_FILE, 'r', encoding='utf-8') as f:
-                last_video_id = f.read().strip()
+                data = json.load(f)
             
-            if last_video_id and last_video_id == video_id:
+            processed_videos = data.get("processed_videos", [])
+            if video_id in processed_videos:
                 if logger:
-                    logger.info(f"Video ID {video_id} đã được xử lý trước đó")
+                    logger.info(f"Video ID {video_id} đã được xử lý thành công trước đó")
                 return True
         
         return False
@@ -125,208 +771,21 @@ def is_link_processed(link):
             logger.error(f"Lỗi kiểm tra link đã xử lý: {str(e)}")
         return False
 
-def get_current_link():
-    """Lấy video_id hiện tại đang làm"""
-    try:
-        if os.path.exists(LINK_JOB_FILE):
-            with open(LINK_JOB_FILE, 'r', encoding='utf-8') as f:
-                video_id = f.read().strip()
-                if video_id:
-                    return f"Video ID: {video_id}"
-                return "Chưa có job"
-    except:
-        pass
-    return "Chưa có job"
-
-def get_status_color(status):
-    """Trả về màu sắc dựa trên trạng thái"""
-    status_lower = status.lower()
-    if "đợi" in status_lower or "chờ" in status_lower or "đang chờ" in status_lower:
-        return "yellow"
-    elif "theo dõi" in status_lower:
-        return "blue"
-    elif "thích" in status_lower:
-        return "magenta"
-    elif "bình luận" in status_lower:
-        return "cyan"
-    elif "yêu thích" in status_lower:
-        return "pink1"
-    elif "hoàn thành" in status_lower or "thành công" in status_lower:
-        return "green"
-    elif "thất bại" in status_lower or "bỏ qua" in status_lower or "skip" in status_lower:
-        return "red"
-    elif "tìm nhiệm vụ" in status_lower:
-        return "bright_black"
-    elif "reset" in status_lower or "force stop" in status_lower:
-        return "bright_red"
-    else:
-        return "white"
-
-def build_table():
-    """Xây dựng bảng dashboard với màu sắc theo trạng thái"""
-    table = Table(show_header=True, header_style="bold magenta", box=box.ROUNDED)
-    
-    table.add_column("STT", style="cyan", width=4)
-    table.add_column("Username", style="bright_yellow", width=15)
-    table.add_column("Trạng thái", style="white", width=40)
-    table.add_column("Đã làm", justify="right", style="green", width=6)
-    table.add_column("Bỏ qua", justify="right", style="red", width=6)
-    table.add_column("Theo dõi", justify="right", style="blue", width=6)
-    table.add_column("Thích", justify="right", style="magenta", width=6)
-    table.add_column("Bình luận", justify="right", style="cyan", width=6)
-    table.add_column("Yêu thích", justify="right", style="pink1", width=6)
-    table.add_column("Xu", justify="right", style="yellow", width=8)
-    
-    for acc_id, data in accounts_data.items():
-        status = str(data.get("status", "Đang chờ..."))
-        status_color = get_status_color(status)
-        status_text = Text(status, style=status_color)
-        
-        table.add_row(
-            str(data.get("stt", "?")),
-            str(data.get("username", "?")),
-            status_text,
-            str(data.get("done", 0)),
-            str(data.get("skip", 0)),
-            str(data.get("follow", 0)),
-            str(data.get("like", 0)),
-            str(data.get("cmt", 0)),
-            str(data.get("favorite", 0)),
-            f"{data.get('coin', 0)}đ"
-        )
-    return table
-
-def get_device_count():
-    """Lấy số lượng thiết bị đang chạy"""
-    return len(accounts_data)
-
-def get_current_link_display():
-    """Lấy link hiện tại đang làm để hiển thị"""
-    try:
-        if os.path.exists(LINK_JOB_FILE):
-            with open(LINK_JOB_FILE, 'r', encoding='utf-8') as f:
-                video_id = f.read().strip()
-                if video_id:
-                    if video_id.isdigit() and len(video_id) > 10:
-                        return f"https://www.tiktok.com/video/{video_id}"
-                    return video_id
-    except:
-        pass
-    return "Chưa có job"
-
-def update_dashboard():
-    """Cập nhật dashboard với layout giống ảnh mẫu - KHÔNG EMOJI"""
-    layout = Layout()
-    
-    title_panel = Panel(
-        Align.center(Text("TIKTOK DASHBOARD", style="bold red")),
-        style="bright_yellow",
-        box=box.DOUBLE
-    )
-    
-    total_coin = sum(acc.get('coin', 0) for acc in accounts_data.values())
-    current_time = datetime.now().strftime('%H:%M:%S')
-    current_date = datetime.now().strftime('%d/%m/%Y')
-    
-    device_text = f"{device_serial if device_serial else 'Chưa kết nối'}"
-    left_panel = Panel(
-        Align.center(Text(device_text, style="bold cyan")),
-        title="[bold green]THIẾT BỊ[/bold green]",
-        border_style="bright_blue",
-        box=box.ROUNDED
-    )
-    
-    follow_mode_text = "Mở link" if FOLLOW_MODE == 1 else "Tìm kiếm"
-    middle_text = f"{total_coin}đ  |  {current_time}  |  {current_date}  |  Follow: {follow_mode_text}"
-    middle_panel = Panel(
-        Align.center(Text(middle_text, style="bold yellow")),
-        title="[bold green]TỔNG XU & THỜI GIAN & CHẾ ĐỘ[/bold green]",
-        border_style="bright_blue",
-        box=box.ROUNDED
-    )
-    
-    current_link = get_current_link_display()
-    if len(current_link) > 50:
-        current_link = current_link[:47] + "..."
-    right_panel = Panel(
-        Align.center(Text(current_link, style="bold magenta")),
-        title="[bold green]LINK JOB[/bold green]",
-        border_style="bright_blue",
-        box=box.ROUNDED
-    )
-    
-    info_row = Columns([left_panel, middle_panel, right_panel])
-    accounts_table = build_table()
-    
-    layout.split_column(
-        Layout(title_panel, size=3),
-        Layout(info_row, size=5),
-        Layout(accounts_table)
-    )
-    
-    return layout
-
-def init_account_data(account_id, username):
-    """Khởi tạo dữ liệu account cho dashboard"""
-    if account_id not in accounts_data:
-        accounts_data[account_id] = {
-            "username": username,
-            "devices": device_serial if device_serial else "N/A",
-            "done": 0,
-            "skip": 0,
-            "follow": 0,
-            "like": 0,
-            "cmt": 0,
-            "favorite": 0,
-            "coin": 0,
-            "status": "Đang chờ...",
-            "stt": len(accounts_data) + 1
-        }
-
-def update_account_stats(account_id, job_type=None, coin=0, success=True):
-    """Cập nhật thống kê cho account"""
-    if account_id not in accounts_data:
-        return
-    
-    if success:
-        accounts_data[account_id]["done"] += 1
-        accounts_data[account_id]["coin"] += coin
-        
-        if job_type == "follow":
-            accounts_data[account_id]["follow"] += 1
-        elif job_type == "like":
-            accounts_data[account_id]["like"] += 1
-        elif job_type == "comment":
-            accounts_data[account_id]["cmt"] += 1
-        elif job_type == "favorite":
-            accounts_data[account_id]["favorite"] += 1
-    else:
-        accounts_data[account_id]["skip"] += 1
-
-def update_account_status(account_id, status):
-    """Cập nhật trạng thái account"""
-    if account_id in accounts_data:
-        accounts_data[account_id]["status"] = status
-
-def get_random_delay():
-    """Trả về delay ngẫu nhiên, đảm bảo >= 1 giây"""
-    return max(1, base_delay + random.randint(-delay_variation, delay_variation))
-
-def clear_screen():
-    os.system('clear' if os.name == 'posix' else 'cls')
 
 def job(msg):
     global logger
     if logger:
         logger.info(msg)
 
+
 def get_instance_files(serial):
     safe_serial = re.sub(r'[^\w\-_]', '_', serial)
     return {
-        'link_job': f"device_{safe_serial}_link_job.txt",
-        'log': f"device_{safe_serial}_log.txt",
-        'check_cmt': f"device_{safe_serial}_check_cmt.txt"
+        'link_job': os.path.join(DATA_DIR, f"device_{safe_serial}_link_job.json"),
+        'log': os.path.join(DATA_DIR, f"device_{safe_serial}_log.txt"),
+        'check_cmt': os.path.join(DATA_DIR, f"device_{safe_serial}_check_cmt.json")
     }
+
 
 def init_instance_files(serial):
     global INSTANCE_FILES, LINK_JOB_FILE, LOG_FILE, CHECK_CMT_FILE, logger, INSTANCE_ID
@@ -343,21 +802,24 @@ def init_instance_files(serial):
     for file in files:
         if not os.path.exists(file):
             try:
-                with open(file, 'w', encoding='utf-8') as f:
-                    if file == LINK_JOB_FILE:
-                        f.write("")
-                    elif file == LOG_FILE:
+                if file == LINK_JOB_FILE:
+                    with open(file, 'w', encoding='utf-8') as f:
+                        json.dump({"processed_videos": []}, f)
+                elif file == LOG_FILE:
+                    with open(file, 'w', encoding='utf-8') as f:
                         f.write(f"# Log file - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} - Thiết bị: {serial}\n")
-                    elif file == CHECK_CMT_FILE:
-                        f.write("")
+                elif file == CHECK_CMT_FILE:
+                    with open(file, 'w', encoding='utf-8') as f:
+                        json.dump({"last_comment": "", "history": []}, f)
             except Exception as e:
                 job(f"Lỗi tạo file {file}: {str(e)}")
                 return False
     return True
 
+
 def setup_instance_logging(serial):
     safe_serial = re.sub(r'[^\w\-_]', '_', serial)
-    log_filename = f"device_{safe_serial}_log.txt"
+    log_filename = os.path.join(DATA_DIR, f"device_{safe_serial}_log.txt")
 
     instance_logger = logging.getLogger(f"device_{safe_serial}")
     instance_logger.setLevel(logging.INFO)
@@ -373,57 +835,267 @@ def setup_instance_logging(serial):
 
     return instance_logger
 
+
 def init_files():
+    """Khởi tạo các file cần thiết"""
+    # Tạo thư mục data nếu chưa tồn tại
+    os.makedirs(DATA_DIR, exist_ok=True)
+    
+    # Tạo file Authorization.json nếu chưa có
     if not os.path.exists(AUTH_FILE):
         try:
-            with open(AUTH_FILE, 'a', encoding='utf-8') as f:
-                f.write("")
-            print("\033[1;32mĐã tạo file Authorization.txt\033[0m")
+            with open(AUTH_FILE, 'w', encoding='utf-8') as f:
+                json.dump({"tokens": []}, f, ensure_ascii=False, indent=2)
+            print(f"Đã tạo file {AUTH_FILE}")
         except Exception as e:
-            print(f"\033[1;31mLỗi tạo file Authorization.txt: {str(e)}\033[0m")
+            print(f"Lỗi tạo file {AUTH_FILE}: {str(e)}")
             return False
+    
+    # Tải cấu hình nếu có
+    load_config()
+    
     return True
 
-def read_auth():
+
+def read_authorizations():
+    """Đọc tất cả Authorization từ file JSON"""
     try:
         if os.path.exists(AUTH_FILE):
             with open(AUTH_FILE, 'r', encoding='utf-8') as f:
-                content = f.read().strip()
-                return content if content else None
-        return None
+                data = json.load(f)
+                return data.get('tokens', [])
+        return []
     except Exception as e:
-        job(f"Lỗi đọc file auth: {str(e)}")
-        return None
+        print(f"Lỗi đọc file auth: {str(e)}")
+        return []
 
-def save_auth(auth):
+
+def save_authorization(auth):
+    """Lưu Authorization mới vào file JSON"""
     try:
-        with open(AUTH_FILE, 'w', encoding='utf-8') as f:
-            f.write(auth)
-        job("Đã lưu authorization")
-        return True
+        current_auths = read_authorizations()
+        if auth not in current_auths:
+            current_auths.append(auth)
+            with open(AUTH_FILE, 'w', encoding='utf-8') as f:
+                json.dump({"tokens": current_auths}, f, ensure_ascii=False, indent=2)
+            return True
+        return False
     except Exception as e:
-        job(f"Lỗi lưu auth: {str(e)}")
+        print(f"Lỗi lưu auth: {str(e)}")
         return False
 
+
+def get_user_me(auth_token, session):
+    """Gọi API /users/me để lấy thông tin user"""
+    try:
+        headers = {
+            'Accept-Language': 'vi,en-US;q=0.9,en;q=0.8',
+            'Referer': 'https://app.golike.net/',
+            'Sec-Ch-Ua': '"Not A(Brand";v="99", "Google Chrome";v="121", "Chromium";v="121"',
+            'Sec-Ch-Ua-Mobile': '?0',
+            'Sec-Ch-Ua-Platform': 'Windows',
+            'Sec-Fetch-Dest': 'empty',
+            'Sec-Fetch-Mode': 'cors',
+            'Sec-Fetch-Site': 'same-site',
+            'T': 'VFZSak1FMTZZM3BOZWtFd1RtYzlQUT09',
+            'User-Agent': 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36',
+            'Authorization': auth_token,
+            'Content-Type': 'application/json;charset=utf-8'
+        }
+        
+        response = session.get('https://gateway.golike.net/api/users/me', headers=headers, timeout=30)
+        response_json = response.json()
+        
+        if response_json.get("status") == 200:
+            data = response_json.get("data", {})
+            return {
+                "success": True,
+                "auth": auth_token,
+                "username": data.get("username", "Unknown"),
+                "coin": data.get("coin", 0)
+            }
+        else:
+            return {
+                "success": False,
+                "auth": auth_token,
+                "message": response_json.get("message", "Token không hợp lệ")
+            }
+    except Exception as e:
+        return {
+            "success": False,
+            "auth": auth_token,
+            "message": str(e)
+        }
+
+
+def load_all_accounts():
+    """Load tất cả Authorization và lấy thông tin user"""
+    global auth_accounts
+    
+    auth_tokens = read_authorizations()
+    
+    if not auth_tokens:
+        return []
+    
+    session = requests.Session()
+    results = []
+    
+    with ThreadPoolExecutor(max_workers=5) as executor:
+        futures = {executor.submit(get_user_me, token, session): token for token in auth_tokens}
+        for future in as_completed(futures):
+            result = future.result()
+            results.append(result)
+    
+    auth_accounts = results
+    return results
+
+
+def display_auth_menu():
+    """Hiển thị menu chọn Authorization với Rich Panel"""
+    console.clear()
+    banner()  # Thêm banner vào đây
+    
+    accounts = load_all_accounts()
+    
+    if not accounts:
+        console.print("[yellow]⚠ Chưa có Authorization nào! Vui lòng nhập token.[/]")
+        new_auth = console.input("[cyan]✈ Nhập Authorization: [/]").strip()
+        if new_auth:
+            save_authorization(new_auth)
+            return display_auth_menu()
+        else:
+            console.print("[red]✖ Authorization không được để trống![/]")
+            sys.exit(1)
+    
+    acc_lines = []
+    for i, acc in enumerate(accounts):
+        idx = f"{i+1:02d}"
+        
+        if acc.get("success"):
+            username = acc.get("username", "Unknown")
+            coin = acc.get("coin", 0)
+            line = f"[#00ffff][{idx}][/] [#ff99cc]{username}[/] | [#99ff99]{coin} coin[/]"
+        else:
+            msg = acc.get('message', 'Lỗi hệ thống')[:30]
+            line = f"[#00ffff][{idx}][/] [red]ERROR:[/] [#ff4444]{msg}[/]"
+        
+        acc_lines.append(line)
+    
+    acc_content = "\n".join(acc_lines)
+    
+    panel_acc = Panel(
+        acc_content,
+        title="[bold #d7d7a8]DS TÀI KHOẢN GOLIKE[/]",
+        title_align="center",
+        border_style="#d7d7a8",
+        padding=(0, 1),
+        width=60
+    )
+    console.print(panel_acc)
+    
+    panel_input = Panel(
+        '[#cccccc]Enter để tiếp tục, nhập "t" để thêm tài khoản golike:[/]',
+        border_style="#d7d7a8",
+        padding=(0, 1),
+        width=80
+    )
+    console.print(panel_input)
+    
+    choice = console.input("[#ff9ecb]➤ [#ffffff]Lựa chọn: [/]").strip().lower()
+    
+    if choice == '':
+        valid_accounts = [acc for acc in accounts if acc.get("success")]
+        if valid_accounts:
+            return valid_accounts[0]["auth"]
+        else:
+            console.print("[red]✖ Không có tài khoản hợp lệ nào![/]")
+            sys.exit(1)
+    elif choice == 't':
+        new_auth = console.input("\n[white]Authorization: [/]").strip()
+        if not new_auth:
+            console.print("[red]Authorization không được để trống![/]")
+            time.sleep(1.5)
+            return display_auth_menu()
+        
+        console.print("[yellow]Đang kiểm tra token...[/]")
+        session = requests.Session()
+        result = get_user_me(new_auth, session)
+        
+        if result.get("success"):
+            console.print(f"[green]✓ Token hợp lệ! Xin chào: {result['username']} | {result['coin']} coin[/]")
+            save_authorization(new_auth)
+            time.sleep(1)
+            return display_auth_menu()
+        else:
+            console.print(f"[red]✗ Token không hợp lệ! Lỗi: {result.get('message', 'Unknown error')}[/]")
+            time.sleep(2)
+            return display_auth_menu()
+    elif choice.isdigit():
+        idx = int(choice) - 1
+        if 0 <= idx < len(accounts):
+            acc = accounts[idx]
+            if acc.get("success"):
+                return acc["auth"]
+            else:
+                console.print(f"[red]✗ Tài khoản này không hợp lệ![/]")
+                time.sleep(1.5)
+                return display_auth_menu()
+        else:
+            console.print(f"[red]Số không hợp lệ! (1-{len(accounts)})[/]")
+            time.sleep(1)
+            return display_auth_menu()
+    else:
+        console.print(f"[red]Lựa chọn không hợp lệ![/]")
+        time.sleep(1)
+        return display_auth_menu()
+
+
 def load_last_comment():
+    """Đọc comment cuối cùng từ file JSON"""
     try:
         if os.path.exists(CHECK_CMT_FILE):
             with open(CHECK_CMT_FILE, 'r', encoding='utf-8') as f:
-                last_comment = f.read().strip()
-            return last_comment if last_comment else None
+                data = json.load(f)
+                return data.get('last_comment', None)
         return None
     except Exception as e:
         job(f"Lỗi đọc file check_cmt: {str(e)}")
         return None
 
+
 def save_comment(comment, status="sent"):
+    """Lưu comment vào file JSON"""
     try:
+        data = {}
+        if os.path.exists(CHECK_CMT_FILE):
+            with open(CHECK_CMT_FILE, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+        
+        data['last_comment'] = comment
+        data['last_status'] = status
+        data['last_time'] = datetime.now().isoformat()
+        
+        if 'history' not in data:
+            data['history'] = []
+        
+        data['history'].append({
+            'comment': comment,
+            'status': status,
+            'timestamp': datetime.now().isoformat()
+        })
+        
+        # Giữ lại tối đa 100 comment
+        if len(data['history']) > 100:
+            data['history'] = data['history'][-100:]
+        
         with open(CHECK_CMT_FILE, 'w', encoding='utf-8') as f:
-            f.write(f"{comment}\n")
+            json.dump(data, f, ensure_ascii=False, indent=2)
+        
         return True
     except Exception as e:
         job(f"Lỗi lưu bình luận: {str(e)}")
         return False
+
 
 def normalize_comment(text):
     if not text:
@@ -432,6 +1104,7 @@ def normalize_comment(text):
     text = re.sub(r'[^\w\s]', ' ', text)
     text = ' '.join(text.split())
     return text
+
 
 def is_duplicate_comment(new_comment, last_comment):
     if not last_comment:
@@ -448,6 +1121,7 @@ def is_duplicate_comment(new_comment, last_comment):
         return True
     return False
 
+
 def filter_comment_content(text):
     if not text:
         return None
@@ -459,6 +1133,7 @@ def filter_comment_content(text):
     if len(text) > 500:
         text = text[:500]
     return text
+
 
 def run_adb_command(args, serial=None):
     global device_serial
@@ -475,86 +1150,60 @@ def run_adb_command(args, serial=None):
         job(f"Lỗi chạy ADB command {cmd}: {str(e)}")
         return None
 
-def get_adb_devices():
-    try:
-        result = subprocess.run(['adb', 'devices'], capture_output=True, text=True, timeout=5)
-        lines = result.stdout.strip().split('\n')[1:]
-        devices = []
-        for line in lines:
-            if line.strip() and 'device' in line and 'offline' not in line:
-                serial = line.split()[0]
-                devices.append(serial)
-        return devices
-    except Exception as e:
-        print(f"\033[1;31mLỗi quét ADB: {str(e)}\033[0m")
-        return []
 
 def select_device():
+    """Chọn thiết bị sử dụng adbutils với hiển thị đẹp"""
     global device, device_serial
-    print("\033[1;33mĐang quét thiết bị ADB...\033[0m")
-    devices = get_adb_devices()
-    if not devices:
-        print("\033[1;31mKhông tìm thấy thiết bị ADB nào!\033[0m")
+    
+    devices_list = get_adb_devices_new()
+    
+    if not devices_list:
+        console.print("[red]Không tìm thấy thiết bị ADB nào![/]")
         return False
-
-    print("\033[1;36m══════════════════════════════════════════════\033[0m")
-    print("\033[1;37mDanh sách thiết bị ADB:\033[0m")
-    for i, serial in enumerate(devices):
-        try:
-            model = run_adb_command(['shell', 'getprop', 'ro.product.model'], serial=serial)
-            model = model.stdout.strip() if model else "Không xác định"
-        except:
-            model = "Không xác định"
-        print(f"\033[1;33m[{i+1}]\033[0m \033[1;36mSerial: {serial} | Model: {model}\033[0m")
 
     while True:
         try:
-            choice = input(f"\033[1;37mChọn thiết bị (1-{len(devices)}): \033[0m").strip()
+            choice = console.input(f"[cyan]✈ Chọn thiết bị (1-{len(devices_list)}): [/]").strip()
             choice = int(choice)
-            if 1 <= choice <= len(devices):
-                device_serial = devices[choice-1]
+            if 1 <= choice <= len(devices_list):
+                device_serial = devices_list[choice-1]
                 if not init_instance_files(device_serial):
-                    print("\033[1;31mKhông thể khởi tạo file cho instance!\033[0m")
+                    console.print("[red]Không thể khởi tạo file cho instance![/]")
                     return False
                 break
             else:
-                print("\033[1;31mLựa chọn không hợp lệ!\033[0m")
+                console.print("[red]Lựa chọn không hợp lệ![/]")
         except:
-            print("\033[1;31mVui lòng nhập số!\033[0m")
+            console.print("[red]Vui lòng nhập số![/]")
 
     return connect_device(device_serial)
+
 
 def connect_device(serial):
     global device
     max_retries = 3
     for attempt in range(max_retries):
         try:
-            print(f"\033[1;33mĐang kết nối đến thiết bị {serial}... (lần {attempt+1})\033[0m")
+            console.print(f"[yellow]Đang kết nối đến thiết bị {serial}... (lần {attempt+1})[/]")
             device = u2.connect(serial)
             device.info
-            print("\033[1;32mKết nối thành công!\033[0m")
+            console.print(f"[green]✓ Kết nối thành công![/]")
             job(f"Kết nối thành công tới thiết bị {serial}")
             check_tiktok_installed()
             return True
         except Exception as e:
-            print(f"\033[1;31mKết nối thất bại: {str(e)}\033[0m")
+            console.print(f"[red]Kết nối thất bại: {str(e)}[/]")
             job(f"Kết nối thất bại tới {serial}: {str(e)}")
             time.sleep(2)
     return False
 
-def reconnect_device():
-    global device
-    print("\033[1;33mMất kết nối thiết bị, đang kết nối lại...\033[0m")
-    job("Mất kết nối thiết bị, đang kết nối lại...")
-    time.sleep(2)
-    return connect_device(device_serial) if device_serial else False
 
 def check_tiktok_installed():
     global device
     try:
         packages = device.app_list()
         if TIKTOK_PACKAGE not in packages:
-            print("\033[1;33mCảnh báo: TikTok chưa được cài đặt!\033[0m")
+            console.print("[yellow]⚠ Cảnh báo: TikTok chưa được cài đặt![/]")
             job("Cảnh báo: TikTok chưa được cài đặt trên thiết bị")
             return False
         return True
@@ -562,567 +1211,78 @@ def check_tiktok_installed():
         job(f"Lỗi kiểm tra TikTok: {str(e)}")
         return False
 
-# ===== HÀM FORCE STOP TIKTOK (HỖ TRỢ ĐA ROM) =====
+
 def force_stop_tiktok():
-    """
-    Buộc dừng ứng dụng TikTok
-    Hỗ trợ nhiều ROM Android (Samsung, Xiaomi, Oppo, Vivo, Pixel, máy xách tay Việt/Anh)
-    """
+    """Buộc dừng TikTok"""
     global device, device_serial
     
-    try:
-        print(f"\033[1;33m[{device_serial}] Đang kiểm tra trạng thái TikTok...\033[0m")
-        job(f"Đang kiểm tra trạng thái TikTok...")
-
-        # Mở App Info
-        device.shell(f"am start -a android.settings.APPLICATION_DETAILS_SETTINGS -d package:{TIKTOK_PACKAGE}")
-
-        # Đợi Settings load - hỗ trợ đa ngôn ngữ
-        if device(textMatches="(?i)(Buộc dừng|Buộc đóng|Force stop|Clear data|Xóa dữ liệu|App info|Storage)").wait(timeout=10):
-
-            time.sleep(1.5)
-
-            # Tìm nút Force Stop (hỗ trợ nhiều ROM)
-            btn_stop = None
+    msg = f"[{device_serial}] Chuẩn bị buộc dừng TikTok"
+    job(msg)
+    update_account_status(account_id, f"Force Stop TikTok...")
+    
+    pkg = TIKTOK_PACKAGE
+    device.shell(f"am start -a android.settings.APPLICATION_DETAILS_SETTINGS -d package:{pkg}")
+    
+    if device(textMatches="(?i)(Buộc dừng|Buộc đóng|Force stop)").wait(timeout=10):
+        time.sleep(1)
+        
+        btn_stop = device(resourceIdMatches=".*(?i)(force_stop|stop_button).*")
+        
+        if not btn_stop.exists:
+            btn_stop = device(textMatches="(?i)(Buộc dừng|Buộc đóng|Force stop)")
+        
+        if btn_stop.exists and btn_stop.info.get('enabled', False):
+            job(f"[{device_serial}] App đang chạy -> Buộc dừng")
+            update_account_status(account_id, f"Đang Force Stop...")
+            btn_stop.click()
             
-            # Thử tìm theo resourceId
-            btn_stop = device(resourceIdMatches=".*force_stop.*|.*stop_button.*|.*forceStop.*")
-            
-            if not btn_stop or not btn_stop.exists:
-                # Thử tìm theo text (đa ngôn ngữ)
-                btn_stop = device(textMatches="(?i)(Buộc dừng|Buộc đóng|Force stop|Stop|Dừng)")
-            
-            if not btn_stop or not btn_stop.exists:
-                # Thử tìm theo className và text
-                for btn in device(className="android.widget.Button"):
-                    try:
-                        btn_text = btn.get_text()
-                        if btn_text and re.search(r'(?i)(force\s*stop|buộc\s*dừng|stop|dừng)', btn_text):
-                            btn_stop = btn
-                            break
-                    except:
-                        continue
-
-            if btn_stop and btn_stop.exists:
-
-                # Nếu nút đang sáng (enabled) → app đang chạy
-                if btn_stop.info.get("enabled", False):
-                    
-                    print(f"\033[1;33m[{device_serial}] TikTok đang chạy → Tiến hành BUỘC DỪNG\033[0m")
-                    job("TikTok đang chạy → Tiến hành BUỘC DỪNG")
-
-                    btn_stop.click()
-                    time.sleep(1.5)
-
-                    # Tìm nút OK/Xác nhận (đa ngôn ngữ)
-                    btn_ok = device(resourceId="android:id/button1")
-                    if not btn_ok.exists:
-                        btn_ok = device(textMatches="(?i)(OK|Đồng ý|Xác nhận|Có|Yes|Accept)")
-                    
-                    if btn_ok.wait(timeout=3):
-                        btn_ok.click()
-                        print(f"\033[1;32m[{device_serial}] Đã buộc dừng TikTok\033[0m")
-                        job("Đã buộc dừng TikTok")
-                    else:
-                        print(f"\033[1;33m[{device_serial}] Không tìm thấy nút xác nhận, nhưng đã click force stop\033[0m")
-
-                else:
-                    print(f"\033[1;32m[{device_serial}] TikTok đã dừng sẵn (nút xám)\033[0m")
-                    job("TikTok đã dừng sẵn (nút xám)")
-
-            else:
-                print(f"\033[1;31m[{device_serial}] Không tìm thấy nút Buộc dừng\033[0m")
-                job("Không tìm thấy nút Buộc dừng")
-
+            btn_ok = device(resourceId="android:id/button1")
+            if btn_ok.wait(timeout=3):
+                btn_ok.click()
+                job(f"[{device_serial}] Đã Force Stop TikTok thành công")
         else:
-            print(f"\033[1;31m[{device_serial}] Không thể mở App Info\033[0m")
-            job("Không thể mở App Info")
+            job(f"[{device_serial}] App đã dừng từ trước")
+    
+    time.sleep(1)
 
-        # Back về màn hình chính
-        device.press('home')
-        time.sleep(1.5)
-        
-        return True
 
-    except Exception as e:
-        print(f"\033[1;31m[{device_serial}] Lỗi force stop: {str(e)}\033[0m")
-        job(f"Lỗi force stop: {str(e)}")
-        
-        # Thử back về home nếu có lỗi
-        try:
-            device.press('home')
-        except:
-            pass
-        
-        return False
-
-def open_tiktok_after_force_stop():
-    """Mở TikTok sau khi force stop"""
+def start_tiktok_and_wait():
+    """Mở TikTok và đợi UI load"""
     global device, device_serial
     
-    try:
-        print(f"\033[1;33m[{device_serial}] Mở TikTok...\033[0m")
-        job("Mở TikTok...")
-        
-        device.app_start(TIKTOK_PACKAGE)
-
-        # Đợi TikTok load - kiểm tra bằng nhiều cách
-        if device(resourceIdMatches=".*tab_layout.*|.*main_tab.*|.*home_tab.*").wait(timeout=15) or \
-           device(descriptionMatches="(?i)(home|trang chủ|feed|for you)").wait(timeout=15):
-            print(f"\033[1;32m[{device_serial}] TikTok sẵn sàng\033[0m")
-            job("TikTok sẵn sàng")
-            time.sleep(2)
-            return True
-        else:
-            print(f"\033[1;31m[{device_serial}] Không phát hiện giao diện TikTok\033[0m")
-            job("Không phát hiện giao diện TikTok")
-            time.sleep(2)
-            return False
-            
-    except Exception as e:
-        print(f"\033[1;31m[{device_serial}] Lỗi mở TikTok: {str(e)}\033[0m")
-        job(f"Lỗi mở TikTok: {str(e)}")
-        return False
-
-# === HÀM GÕ TEXT TỰ NHIÊN - KHÔNG ÉP DÙNG AXT KEYBOARD ===
-def type_text_natural(element, text):
-    """
-    Gõ text tự nhiên - click vào ô nhập và để bàn phím mặc định của máy tự bật lên
-    Sau đó gõ từng ký tự bằng adb shell input text - KHÔNG ÉP DÙNG AXT
-    """
-    global device, device_serial
-    try:
-        if not text:
-            return True
-            
-        job(f"Bắt đầu gõ text tự nhiên: {text[:20]}... (dài {len(text)} ký tự)")
-        
-        # Click vào ô nhập để focus và bật bàn phím mặc định
-        element.click()
-        time.sleep(1.5)  # Đợi bàn phím mặc định bật lên tự nhiên
-        
-        # Sử dụng adb shell input text để gõ - phương pháp tự nhiên nhất
-        # Không cần set IME, không cần kích hoạt app keyboard
-        escaped_text = text.replace(" ", "%s").replace("'", "\\'").replace('"', '\\"')
-        
-        # Gõ từng phần nếu text quá dài (adb input text có giới hạn)
-        max_chunk = 100
-        for i in range(0, len(escaped_text), max_chunk):
-            chunk = escaped_text[i:i+max_chunk]
-            cmd = f"input text '{chunk}'"
-            device.shell(cmd)
-            time.sleep(0.3)  # Delay nhẹ giữa các chunk
-        
-        job(f"Đã gõ xong {len(text)} ký tự bằng input text tự nhiên")
+    msg = f"[{device_serial}] Đang mở TikTok..."
+    job(msg)
+    update_account_status(account_id, f"Đang mở TikTok...")
+    
+    device.app_start(TIKTOK_PACKAGE)
+    
+    if device(resourceIdMatches=".*tab_layout.*").wait(timeout=15):
+        job(f"[{device_serial}] TikTok đã sẵn sàng")
+        update_account_status(account_id, f"TikTok sẵn sàng")
         return True
-        
-    except Exception as e:
-        job(f"Lỗi khi gõ text tự nhiên: {str(e)}")
+    else:
+        job(f"[{device_serial}] Không thể đợi TikTok load")
         return False
 
-def focus_and_type_natural(element, text):
-    """
-    Focus vào element và gõ text tự nhiên - KHÔNG ÉP DÙNG AXT
-    """
-    global device
-    try:
-        if not element or not element.exists:
-            job("Element không tồn tại")
-            return False
-        
-        # Click vào element để focus và bật bàn phím mặc định
-        element.click()
-        time.sleep(1)  # Đợi bàn phím bật lên
-        
-        # Xóa nội dung cũ nếu có (tùy chọn)
-        try:
-            element.clear_text()
-            time.sleep(0.5)
-        except:
-            pass
-        
-        # Gõ text tự nhiên
-        return type_text_natural(element, text)
-        
-    except Exception as e:
-        job(f"Lỗi trong focus_and_type_natural: {str(e)}")
-        return False
 
 def open_link(link):
-    """Mở link TikTok với tham số -W để đợi intent hoàn thành - tránh bị redirect"""
     global device
     try:
-        cmd = f'am start -W -a android.intent.action.VIEW -d "{link}" {TIKTOK_PACKAGE}'
+        cmd = f'am start -a android.intent.action.VIEW -d "{link}" {TIKTOK_PACKAGE}'
         device.shell(cmd)
-
         launched = device.app_wait(TIKTOK_PACKAGE, timeout=10)
-
         if launched:
             job(f"Đã mở link: {link}")
-            time.sleep(1.5)  # Đợi thêm để tránh redirect
-
+        else:
+            job(f"Không thể mở link: {link}")
         return launched
     except Exception as e:
         job(f"Lỗi mở link {link}: {str(e)}")
         return False
 
-def open_tiktok():
-    """Mở ứng dụng TikTok"""
-    global device
-    try:
-        device.app_start(TIKTOK_PACKAGE)
-        time.sleep(3)
-        return True
-    except Exception as e:
-        job(f"Lỗi mở TikTok: {str(e)}")
-        return False
-
-def click_search():
-    """Click vào ô tìm kiếm trên TikTok - chỉ dùng selector chính xác"""
-    global device
-    try:
-        # Chỉ dùng các selector chính xác, không dùng ImageView chung chung
-        search_selectors = [
-            {'description': 'Search'},
-            {'description': 'Tìm kiếm'},
-            {'text': 'Search'},
-            {'text': 'Tìm kiếm'},
-            {'resourceId': 'com.ss.android.ugc.trill:id/search'}, 
-            {'resourceId': 'com.ss.android.ugc.trill:id/action_search'}
-        ]
-        
-        for selector in search_selectors:
-            try:
-                element = device(**selector)
-                if element.exists:
-                    element.click()
-                    time.sleep(1)
-                    job("Đã click vào ô tìm kiếm")
-                    return True
-            except:
-                continue
-        
-        job("Không tìm thấy nút tìm kiếm với selector chính xác")
-        return False
-    except Exception as e:
-        job(f"Lỗi click tìm kiếm: {str(e)}")
-        return False
-
-def click_users_tab():
-    """Click vào tab Users trong kết quả tìm kiếm"""
-    global device
-    try:
-        # Tìm tab Users
-        users_tab_selectors = [
-            {'text': 'Users'},
-            {'text': 'Người dùng'},
-            {'text': 'People'},
-            {'resourceId': 'com.ss.android.ugc.trill:id/tab_title', 'text': 'Users'},
-            {'resourceId': 'com.ss.android.ugc.trill:id/tab_title', 'text': 'Người dùng'}
-        ]
-        
-        for selector in users_tab_selectors:
-            try:
-                element = device(**selector)
-                if element.exists:
-                    element.click()
-                    time.sleep(2)
-                    job("Đã chuyển sang tab Users")
-                    return True
-            except:
-                continue
-        
-        # Nếu không tìm thấy tab Users, có thể đang ở tab Users mặc định
-        job("Không tìm thấy tab Users, có thể đang ở tab Users")
-        return True
-    except Exception as e:
-        job(f"Lỗi click tab Users: {str(e)}")
-        return False
-
-def find_exact_username_in_search_results(username):
-    """Tìm username chính xác trong kết quả tìm kiếm - KHÔNG VUỐT"""
-    global device
-    try:
-        # Chuẩn hóa username (bỏ @ nếu có)
-        target_username = username.replace('@', '').strip().lower()
-        
-        # Danh sách selectors - đã thêm fallback className TextView
-        username_selectors = [
-            # ResourceId chính xác
-            {'resourceId': 'com.ss.android.ugc.trill:id/username'},
-            {'resourceId': 'com.ss.android.ugc.trill:id/user_name'},
-            {'resourceId': 'com.ss.android.ugc.trill:id/tv_name'},
-            # Fallback cho mọi phiên bản TikTok
-            {'className': 'android.widget.TextView'}
-        ]
-        
-        # KHÔNG VUỐT - chỉ tìm trong kết quả hiện tại
-        # Thử từng selector một lần duy nhất, không vuốt
-        for selector in username_selectors:
-            try:
-                # Lấy tất cả các element phù hợp với selector
-                elements = device(**selector).all()
-                
-                if elements and len(elements) > 0:
-                    job(f"Tìm thấy {len(elements)} element với selector {selector}")
-                    
-                    # Duyệt qua từng element trong danh sách
-                    for elem in elements:
-                        try:
-                            text = elem.get_text()
-                            if text:
-                                # Chuẩn hóa text (bỏ @ nếu có)
-                                clean_text = text.replace('@', '').strip().lower()
-                                
-                                # Lọc thêm: tránh các text quá dài hoặc có dấu hiệu không phải username
-                                if len(clean_text) > 30:  # Username thường không quá dài
-                                    continue
-                                
-                                # Tránh các text phổ biến không phải username
-                                common_texts = ['follow', 'following', 'theo dõi', 'đang theo dõi', 
-                                               'message', 'nhắn tin', 'share', 'chia sẻ', 'report',
-                                               'block', 'chặn', 'videos', 'video', 'likes', 'thích',
-                                               'followers', 'người theo dõi', 'following', 'đang follow']
-                                if clean_text in common_texts:
-                                    continue
-                                
-                                # So sánh chính xác
-                                if clean_text == target_username:
-                                    job(f"Tìm thấy username chính xác: {text}")
-                                    elem.click()
-                                    time.sleep(2)  # Đợi profile load
-                                    return True
-                                
-                                # Fallback: nếu username chứa target (trong trường hợp có prefix/suffix)
-                                if target_username in clean_text and len(clean_text) - len(target_username) <= 3:
-                                    job(f"Tìm thấy username gần đúng: {text} (chứa {target_username})")
-                                    elem.click()
-                                    time.sleep(2)
-                                    return True
-                                    
-                        except Exception as e:
-                            job(f"Lỗi xử lý element: {str(e)}")
-                            continue
-            except Exception as e:
-                job(f"Lỗi với selector {selector}: {str(e)}")
-                continue
-        
-        # KHÔNG VUỐT - nếu không tìm thấy thì báo lỗi ngay
-        job(f"Không tìm thấy username chính xác '{username}' trong kết quả tìm kiếm (không vuốt)")
-        return False
-        
-    except Exception as e:
-        job(f"Lỗi tìm username chính xác: {str(e)}")
-        return False
-
-def verify_profile_username(expected_username):
-    """Kiểm tra username trên profile có khớp với expected_username không - chỉ dùng selector chính xác"""
-    global device
-    try:
-        # Chỉ dùng các selector chính xác cho username profile
-        username_selectors = [
-            {'resourceId': 'com.ss.android.ugc.trill:id/profile_title'},
-            {'resourceId': 'com.ss.android.ugc.trill:id/title'},
-            {'resourceId': 'com.ss.android.ugc.trill:id/user_name'}
-        ]
-        
-        # Đợi profile load tối thiểu 3-4 giây
-        time.sleep(4)
-        
-        target_username = expected_username.replace('@', '').strip().lower()
-        
-        for selector in username_selectors:
-            try:
-                element = device(**selector)
-                if element.exists:
-                    profile_username_text = element.get_text()
-                    if profile_username_text:
-                        clean_profile = profile_username_text.replace('@', '').strip().lower()
-                        
-                        if clean_profile == target_username:
-                            job(f"Xác minh username thành công: {profile_username_text} == {expected_username}")
-                            return True
-                        else:
-                            job(f"Username không khớp: {profile_username_text} != {expected_username}")
-                            return False
-            except:
-                continue
-        
-        job("Không tìm thấy username trên profile để xác minh")
-        return False
-    except Exception as e:
-        job(f"Lỗi verify username: {str(e)}")
-        return False
-
-def type_search_natural(username):
-    """
-    Focus vào ô tìm kiếm và gõ username tự nhiên - KHÔNG ÉP DÙNG AXT
-    """
-    global device
-    try:
-        # Tìm ô nhập liệu
-        input_box = None
-        input_selectors = [
-            {'className': 'android.widget.EditText'},
-            {'resourceId': 'com.ss.android.ugc.trill:id/search_edit_text'},
-            {'resourceId': 'com.ss.android.ugc.trill:id/et_search_keyword'}
-        ]
-        
-        for selector in input_selectors:
-            try:
-                element = device(**selector)
-                if element.exists:
-                    input_box = element
-                    break
-            except:
-                continue
-        
-        if not input_box:
-            job("Không tìm thấy ô nhập tìm kiếm")
-            return False
-        
-        # Focus và gõ username tự nhiên - KHÔNG ÉP DÙNG AXT
-        if not focus_and_type_natural(input_box, username):
-            job("Không thể gõ username")
-            return False
-        
-        # Đợi 1 giây sau khi gõ xong
-        time.sleep(1)
-        
-        # Tìm và click nút tìm kiếm
-        search_buttons = [
-            {'text': 'Search'}, 
-            {'text': 'Tìm kiếm'},
-            {'resourceId': 'com.ss.android.ugc.trill:id/search_button'},
-            {'description': 'Search'},
-            {'description': 'Tìm kiếm'},
-            {'className': 'android.widget.Button', 'textMatches': '(?i)search|tìm kiếm'}
-        ]
-        
-        search_clicked = False
-        for btn_selector in search_buttons:
-            try:
-                btn = device(**btn_selector)
-                if btn.exists and btn.info.get('enabled', False):
-                    btn.click()
-                    search_clicked = True
-                    job(f"Đã click nút tìm kiếm: {btn_selector}")
-                    break
-            except:
-                continue
-        
-        # Nếu không tìm thấy nút tìm kiếm, thử nhấn Enter
-        if not search_clicked:
-            job("Không tìm thấy nút tìm kiếm, nhấn Enter")
-            device.press('enter')
-        
-        # Đợi kết quả tìm kiếm load
-        time.sleep(3)
-        
-        job(f"Đã tìm kiếm username: {username} (gõ tự nhiên, không ép dùng AXT)")
-        return True
-        
-    except Exception as e:
-        job(f"Lỗi trong type_search_natural: {str(e)}")
-        return False
-
-def do_follow_via_search_natural(username):
-    """Thực hiện follow bằng cách tìm kiếm username - KHÔNG ÉP DÙNG AXT"""
-    global device
-    
-    if not username:
-        job("Không có username để tìm kiếm")
-        return False
-    
-    job(f"Bắt đầu follow bằng tìm kiếm cho username: {username} (không ép dùng AXT)")
-    
-    # Bước 1: Mở TikTok
-    if not open_tiktok():
-        job("Không thể mở TikTok")
-        return False
-    
-    # Bước 2: Click nút tìm kiếm
-    if not click_search():
-        job("Không thể click vào ô tìm kiếm")
-        return False
-    
-    # Bước 3: Gõ username tự nhiên và search - KHÔNG ÉP DÙNG AXT
-    if not type_search_natural(username):
-        job("Không thể thực hiện tìm kiếm")
-        return False
-    
-    # Bước 4: Vào tab Users
-    if not click_users_tab():
-        job("Không thể chuyển sang tab Users")
-        return False
-    
-    # Bước 5: Click đúng username
-    if not find_exact_username_in_search_results(username):
-        job(f"Không tìm thấy username chính xác '{username}' - Skip job")
-        device.press('back')
-        time.sleep(1)
-        device.press('back')
-        time.sleep(1)
-        return False
-    
-    # Bước 6: Đợi profile load và kiểm tra username
-    if not verify_profile_username(username):
-        job(f"Username trên profile không khớp với {username} - Skip job")
-        device.press('back')
-        time.sleep(1)
-        device.press('back')
-        time.sleep(1)
-        return False
-    
-    # Bước 7: Thực hiện follow
-    if not do_follow(device):
-        job("Follow thất bại")
-        device.press('back')
-        time.sleep(1)
-        device.press('back')
-        time.sleep(1)
-        return False
-    
-    # Bước 8: Back về màn hình chính
-    job("Back về màn hình chính")
-    device.press('back')
-    time.sleep(1)
-    device.press('back')
-    time.sleep(1)
-    
-    job(f"Follow thành công cho username: {username} (không ép dùng AXT)")
-    return True
-
-def do_follow_via_link(link):
-    """Thực hiện follow bằng cách mở link profile (cách cũ)"""
-    global device
-    
-    if not link:
-        job("Không có link để mở")
-        return False
-    
-    job(f"Bắt đầu follow bằng link: {link}")
-    
-    # Mở link với tham số -W
-    if not open_link(link):
-        job("Không thể mở link")
-        return False
-    
-    time.sleep(3)  # Đợi profile load
-    
-    # Thực hiện follow
-    if not do_follow(device):
-        job("Follow thất bại")
-        return False
-    
-    # Quay lại
-    device.press('back')
-    time.sleep(1)
-    
-    job("Follow thành công qua link")
-    return True
 
 previous_job_link = None
+
 
 def find_first_selector(d, candidates, timeout_per=1):
     for sel in candidates:
@@ -1134,117 +1294,264 @@ def find_first_selector(d, candidates, timeout_per=1):
             continue
     return None, None
 
-def do_like(d):
-    if not d:
-        return False
 
-    candidates = [
-        {'resourceId': "com.ss.android.ugc.trill:id/like_button"},
-        {'resourceId': "com.ss.android.ugc.trill:id/a_f"},
-        {'descriptionContains': "like"},
-        {'descriptionContains': "thích"},
-        {'textContains': "Thích"},
-    ]
-    btn, sel = find_first_selector(d, candidates, timeout_per=2)
-    if not btn:
-        job("Không tìm thấy nút thích")
-        return False
-
+def dump_ui_nodes(device_obj):
+    """Dump UI nodes trực tiếp bằng uiautomator2 (Nhanh, không lag, không lỗi object)"""
     try:
-        btn.click()
-        time.sleep(1.2)
-        return True
+        # Lấy XML giao diện trực tiếp siêu nhanh (không cần ghi file vào sdcard)
+        xml_content = device_obj.dump_hierarchy()
+        
+        # Parse XML để lấy các node
+        nodes = []
+        for match in re.finditer(r'<node (.*?)>', xml_content):
+            attrs = dict(re.findall(r'([\w\-]+)="([^"]*)"', match.group(1)))
+            nodes.append(attrs)
+        
+        return nodes
     except Exception as e:
-        job(f"Lỗi click thích: {str(e)}")
-        return False
+        job(f"Lỗi dump UI nodes: {str(e)}")
+        return []
 
-def do_follow(d):
-    if not d:
-        return False
 
-    # Chỉ dùng selector chính xác, tránh click nhầm Following/Follow back
-    candidates = [
-        {'resourceId': "com.ss.android.ugc.trill:id/follow_btn"},
-        {'resourceId': "com.ss.android.ugc.trill:id/a_x"},
-        {'textMatches': "(?i)^follow$|^theo dõi$"},  # Chỉ match chính xác từ "follow" hoặc "theo dõi"
-    ]
-    btn, sel = find_first_selector(d, candidates, timeout_per=2)
-    if not btn:
-        job("Không tìm thấy nút theo dõi")
+def click_node_by_bounds(device_obj, node):
+    """Click vào node dựa trên bounds"""
+    bounds = node.get("bounds")
+    if not bounds:
         return False
-
-    try:
-        btn.click()
-        time.sleep(1.2)
+    
+    # Extract coordinates từ bounds (dạng [x1,y1][x2,y2])
+    pts = list(map(int, re.findall(r'\d+', bounds)))
+    if len(pts) >= 4:
+        x = (pts[0] + pts[2]) // 2
+        y = (pts[1] + pts[3]) // 2
+        
+        job(f"Click tại {x},{y}")
+        device_obj.click(x, y)
         return True
-    except Exception as e:
-        job(f"Lỗi click theo dõi: {str(e)}")
-        return False
+    
+    return False
 
-def do_favorite(d):
+
+# ==================== CÁC HÀM XỬ LÝ LIKE MỚI (PRO MAX) ====================
+def is_like_node(node):
+    """Kiểm tra node có phải nút like không"""
+    res_id = node.get("resource-id", "")
+    desc = node.get("content-desc", "").lower()
+    
+    if "like" in desc or "thích" in desc:
+        return True
+    
+    if any(k in res_id for k in ["like", "digg", "heart"]):
+        return True
+    
+    return False
+
+
+def is_liked(node):
+    """Kiểm tra node đã được like chưa"""
+    desc = node.get("content-desc", "").lower()
+    return (
+        node.get("selected") == "true"
+        or "unlike" in desc
+        or "bỏ thích" in desc
+    )
+
+
+def find_like_btn(nodes):
+    """Tìm nút like trong danh sách nodes (ưu tiên bên phải)"""
+    candidates = []
+    
+    for node in nodes:
+        if is_like_node(node):
+            bounds = node.get("bounds", "")
+            if bounds:
+                pts = list(map(int, re.findall(r'\d+', bounds)))
+                if len(pts) >= 4:
+                    x = (pts[0] + pts[2]) // 2
+                    # Ưu tiên nút ở bên phải màn hình (x > 500)
+                    if x > 500:
+                        candidates.append((node, x))
+    
+    if not candidates:
+        return None
+    
+    # Sắp xếp theo tọa độ x giảm dần (ưu tiên nút bên phải nhất)
+    candidates.sort(key=lambda x: x[1], reverse=True)
+    return candidates[0][0]
+
+
+def do_like(d, max_retry=10):
+    """Thực hiện like với cơ chế verify mới (Pro Max)"""
     if not d:
         return False
-
-    try:
-        selectors = [
-            {"descriptionContains": "Favorite"},
-            {"descriptionContains": "Favourite"},
-            {"descriptionContains": "Add to favorites"},
-            {"descriptionContains": "Save to favorites"},
-            {"textContains": "Favorite"},
-            {"textContains": "Favourite"},
-            {"descriptionContains": "Yêu thích"},
-            {"descriptionContains": "Thêm vào yêu thích"},
-            {"descriptionContains": "Lưu vào yêu thích"},
-            {"textContains": "Yêu thích"},
-            {"descriptionContains": "收藏"},
-            {"descriptionContains": "お気に入り"},
-            {"descriptionContains": "즐겨찾기"},
-        ]
-
-        for sel in selectors:
-            obj = d(**sel)
-            if obj.exists(timeout=2):
-                job(f"Tìm thấy nút yêu thích qua: {sel}")
-                obj.click()
-                time.sleep(1)
-                return True
-
-        job("Không tìm thấy qua text/description, thử tìm theo class...")
-        for obj in d(className="android.widget.ImageView", clickable=True):
-            try:
-                bounds = obj.info.get('bounds', {})
-                content_desc = obj.info.get('contentDescription', '').lower()
-
-                if bounds and 'right' in bounds:
-                    if bounds.get('right', 0) > 800:
-                        if any(keyword in content_desc for keyword in ['favorite', 'thích', 'yêu', '收藏']):
-                            job(f"Tìm thấy nút yêu thích qua bounds + content-desc: {content_desc}")
-                            obj.click()
-                            time.sleep(1)
-                            return True
-            except:
+    
+    job("Scan tìm nút Like...")
+    clicked = False
+    
+    for i in range(max_retry):
+        nodes = dump_ui_nodes(d)
+        btn = find_like_btn(nodes)
+        
+        if not btn:
+            job(f"Retry {i+1}/{max_retry} - chưa thấy nút")
+            time.sleep(1.5)
+            continue
+        
+        if is_liked(btn):
+            job("Đã Like rồi")
+            return True
+        
+        # Click lần đầu
+        if not clicked:
+            job(f"Click Like (lần {i+1})")
+            if not click_node_by_bounds(d, btn):
+                job("Không thể click nút like")
                 continue
+            clicked = True
+        else:
+            job("Đã click → chờ verify")
+        
+        # Verify xịn
+        for check in range(3):
+            time.sleep(2)
+            
+            nodes_after = dump_ui_nodes(d)
+            btn_after = find_like_btn(nodes_after)
+            
+            if not btn_after:
+                job("UI lag → chưa thấy lại")
+                continue
+            
+            if is_liked(btn_after):
+                job("Like thành công (verified)")
+                return True
+            
+            job(f"Verify {check+1} chưa ăn")
+        
+        # Fallback: click chưa ăn → cho click lại
+        job("Click chưa ăn → cho click lại")
+        clicked = False
+        time.sleep(2)
+    
+    job("Fail Like")
+    return False
 
-        try:
-            for obj in d(className="android.widget.ImageView"):
-                res_id = obj.info.get('resourceName', '')
-                if res_id and ('favorite' in res_id.lower() or 'fav' in res_id.lower()):
-                    if obj.clickable:
-                        job(f"Tìm thấy nút yêu thích qua resourceId: {res_id}")
-                        obj.click()
-                        time.sleep(1)
-                        return True
-        except:
-            pass
 
+# ==================== CÁC HÀM XỬ LÝ FOLLOW MỚI (CÓ VÒNG LẶP CHỜ) ====================
+def do_follow(d, max_retry=3):
+    """Thực hiện follow có vòng lặp chờ load giao diện"""
+    if not d:
         return False
+
+    try:
+        target_texts = ["theo dõi", "follow", "follow back", "follow lại"]
+        target_ids = ["follow_or_edit_profile_btn", "follow_btn"]
+        
+        for i in range(max_retry):
+            job(f"Đang quét UI tìm nút Follow (Lần {i+1})...")
+            nodes = dump_ui_nodes(d)
+            
+            for node in nodes:
+                text = node.get("text", "").strip().lower()
+                res_id = node.get("resource-id", "")
+                
+                if any(t == text for t in target_texts) or any(idx in res_id for idx in target_ids):
+                    # ===== ĐÃ FOLLOW TỪ TRƯỚC =====
+                    if "đang theo dõi" in text or "following" in text:
+                        job("Đã follow từ trước")
+                        return True
+                    
+                    # ===== CLICK VÀ VERIFY =====
+                    if click_node_by_bounds(d, node):
+                        job("Đã click nút follow, đang verify...")
+                        time.sleep(3.5)
+                        
+                        nodes_after = dump_ui_nodes(d)
+                        verified = False
+                        is_reverted = False
+                        success_texts = ["đang theo dõi", "following", "nhắn tin", "message"]
+                        
+                        for n in nodes_after:
+                            t = n.get("text", "").lower()
+                            desc = n.get("content-desc", "").lower()
+                            
+                            if any(s in t for s in success_texts) or any(s in desc for s in success_texts):
+                                verified = True
+                                break
+                            if any(tf == t for tf in target_texts):
+                                is_reverted = True
+                        
+                        if verified:
+                            job("Follow thành công (real)")
+                            return True
+                        elif is_reverted:
+                            job("Bị nhả follow (Shadowban hoặc mạng lỗi)")
+                            return False
+                        else:
+                            job("Nút follow đã mất, nhưng UI khác lạ (KHÔNG phải fail)")
+                            return True
+            
+            # Chưa thấy nút thì chờ mạng load 2 giây rồi quét lại
+            time.sleep(2)
+            
+        job("Không tìm thấy nút Follow sau khi đã chờ load")
+        return False
+            
+    except Exception as e:
+        job(f"Lỗi trong do_follow: {str(e)}")
+        return False
+
+
+# ==================== CÁC HÀM XỬ LÝ FAVORITE MỚI (CÓ VÒNG LẶP CHỜ) ====================
+def do_favorite(d, max_retry=6):
+    """Thực hiện Favorite có vòng lặp chờ load giao diện"""
+    if not d:
+        return False
+
+    try:
+        fav_identifiers = {
+            "ids": ["favorite_icon", "h2m", "iv_favorite", "com.ss.android.ugc.trill:id/favorite_icon"],
+            "descs": ["favorite", "yêu thích", "lưu", "favorites"]
+        }
+
+        for i in range(max_retry):
+            job(f"Đang quét UI tìm đúng nút Lưu (Lần {i+1})...")
+            nodes = dump_ui_nodes(d)
+            
+            for node in nodes:
+                res_id = node.get("resource-id", "")
+                desc = node.get("content-desc", "").lower()
+                
+                is_fav = any(tid in res_id for tid in fav_identifiers["ids"]) or \
+                         any(td in desc for td in fav_identifiers["descs"])
+
+                if is_fav:
+                    if node.get("selected") == "true" or "đã lưu" in desc or "added" in desc:
+                        job("Video này đã được lưu vào Favorites từ trước.")
+                        return True
+                    
+                    bounds = node.get("bounds", "")
+                    if bounds:
+                        job(f"Đã tìm thấy nút Favorites! (ID: {res_id})")
+                        if click_node_by_bounds(d, node):
+                            job("Đã Lưu video thành công!")
+                            time.sleep(1.5)
+                            return True
+                            
+            # Chưa thấy nút thì chờ mạng load 2 giây rồi quét lại
+            time.sleep(2)
+
+        job("Không tìm thấy nút Favorites. Kiểm tra lại giao diện TikTok.")
+        return False
+        
     except Exception as e:
         job(f"Lỗi trong do_favorite: {str(e)}")
         return False
 
-def do_comment_natural(d, text, link):
-    """Thực hiện comment - KHÔNG ÉP DÙNG AXT"""
+
+# ==================== CÁC HÀM XỬ LÝ COMMENT MỚI (CV2 + VÒNG LẶP CHỜ + TỰ ĐỘNG TẢI ẢNH) ====================
+def do_comment(d, text, link):
+    """Thực hiện comment tích hợp nhận diện ảnh OpenCV (cv2) và vòng lặp chờ load"""
     if not d:
         return False
 
@@ -1257,210 +1564,162 @@ def do_comment_natural(d, text, link):
     if not filtered_text:
         return False
 
+    # Check trùng comment
     last_comment = load_last_comment()
-
     if is_duplicate_comment(filtered_text, last_comment):
         job(f"Bình luận trùng/tương đồng với bình luận cuối cùng")
         return False
 
-    # Tìm nút bình luận
-    comment_candidates = [
-        {'resourceId': "com.ss.android.ugc.trill:id/comment_button"},
-        {'resourceId': "com.ss.android.ugc.trill:id/a_y"},
-        {'descriptionContains': "comment"},
-        {'descriptionContains': "bình luận"},
-    ]
-    comment_btn, sel_c = find_first_selector(d, comment_candidates, timeout_per=3)
-    if not comment_btn:
-        job("Không tìm thấy nút bình luận")
+    # 1. Mở khung comment (có vòng lặp chờ load)
+    job("Đợi video load để tìm nút comment...")
+    comment_opened = False
+    for attempt in range(5):
+        comment_btn = d(descriptionContains="comment")
+        if not comment_btn.exists:
+            comment_btn = d(descriptionContains="bình luận")
+            
+        if comment_btn.exists:
+            comment_btn.click()
+            time.sleep(2)
+            comment_opened = True
+            break
+        
+        # Nếu chưa thấy nút comment, nghỉ 2s chờ video load tiếp
+        job(f"Chưa thấy nút comment, chờ load (lần {attempt+1}/5)...")
+        time.sleep(2)
+        
+    if not comment_opened:
+        job("Không tìm thấy nút comment sau khi chờ")
         return False
 
+    # 2. Nhập nội dung
+    job("Tìm ô nhập comment...")
+    input_box = d(className="android.widget.EditText")
+    if not input_box.exists:
+        job("Không thấy ô nhập")
+        return False
+
+    input_box.click()
+    time.sleep(0.5)
+    
     try:
-        comment_btn.click()
-        time.sleep(1.5)
-    except Exception as e:
-        job(f"Lỗi click bình luận: {str(e)}")
-        return False
+        input_box.clear_text()
+    except:
+        pass
+        
+    d.clipboard.set(filtered_text)
+    d.press("paste")
+    time.sleep(1)
+    job("Đã nhập nội dung comment")
 
-    # Tìm ô nhập bình luận
-    input_box = None
+    # 3. Tìm và click nút gửi bằng CV2
+    job("Tìm nút gửi bằng ảnh (cv2)...")
     try:
-        input_box = d(className="android.widget.EditText")
-        if not input_box.wait(timeout=5):
-            input_box, _ = find_first_selector(d, [{'className': "android.widget.EditText"}, {'resourceId': "com.ss.android.ugc.trill:id/comment_edit_text"}], timeout_per=1)
-    except Exception:
-        input_box = None
-
-    if not input_box:
-        job("Không tìm thấy ô nhập bình luận")
-        return False
-
-    # Focus và gõ comment tự nhiên - KHÔNG ÉP DÙNG AXT
-    if not focus_and_type_natural(input_box, filtered_text):
-        job("Không thể gõ nội dung bình luận")
-        return False
-
-    # Tìm nút gửi
-    send_candidates = [
-        {'resourceId': "com.ss.android.ugc.trill:id/send_btn"},
-        {'resourceId': "com.ss.android.ugc.trill:id/send_button"},
-        {'textMatches': "(?i)send|post|gửi|đăng"},
-        {'descriptionContains': "gửi"},
-    ]
-    send_btn, send_sel = find_first_selector(d, send_candidates, timeout_per=2)
-    if send_btn and send_btn.info.get('enabled'):
-        try:
-            send_btn.click()
-            time.sleep(0.5)
-        except Exception:
+        # Chụp màn hình
+        screenshot = d.screenshot(format="opencv")
+        
+        # Đường dẫn file template nút gửi (tự động tải nếu chưa có)
+        template_path = check_and_download_gui()
+        
+        if not os.path.exists(template_path):
+            job("Cảnh báo: Không tìm thấy file ảnh, dùng phím Enter thay thế")
             d.press("enter")
-    else:
+        else:
+            template = cv2.imread(template_path)
+            result = cv2.matchTemplate(screenshot, template, cv2.TM_CCOEFF_NORMED)
+            min_val, max_val, min_loc, max_loc = cv2.minMaxLoc(result)
+
+            job(f"Độ khớp ảnh nút Gửi: {max_val:.2f}")
+            threshold = 0.7
+
+            if max_val >= threshold:
+                h, w = template.shape[:2]
+                x = max_loc[0] + w // 2
+                y = max_loc[1] + h // 2
+                d.click(x, y)
+                job(f"Đã click nút Gửi qua CV2 tại ({x},{y})")
+            else:
+                job("Độ khớp thấp, dùng phím Enter thay thế")
+                d.press("enter")
+    except Exception as e:
+        job(f"Lỗi xử lý CV2: {str(e)}, dùng phím Enter thay thế")
         d.press("enter")
 
-    save_comment(filtered_text, "sent")
-    previous_job_link = link
-    job(f"Đã bình luận: {filtered_text[:30]}... (gõ tự nhiên, không ép dùng AXT)")
-    return True
+    # 4. Verify kết quả
+    if verify_comment_success(d, filtered_text):
+        save_comment(filtered_text, "sent")
+        previous_job_link = link
+        return True
+    else:
+        job("Comment thất bại trong verify")
+        return False
 
-def call_api_complete(ads_id, account_id):
-    """Gọi API complete và trả về (success, message)"""
+
+def verify_comment_success(d, comment_text):
+    """Kiểm tra comment đã được đăng thành công chưa"""
+    try:
+        time.sleep(2)
+        
+        comment_elements = d(className="android.widget.TextView")
+        found = False
+        
+        for elem in comment_elements:
+            try:
+                text = elem.get_text()
+                if text and comment_text and len(text) > 5 and len(comment_text) > 5:
+                    similarity = SequenceMatcher(None, text.lower(), comment_text.lower()).ratio()
+                    if similarity > 0.7:
+                        job(f"Tìm thấy comment với độ tương đồng {similarity:.2f}")
+                        found = True
+                        break
+            except:
+                continue
+        
+        if found:
+            return True
+            
+        error_msg = d(textMatches="(?i)(lỗi|thất bại|không thể đăng|spam)")
+        if error_msg.exists(timeout=2):
+            job("Phát hiện thông báo lỗi khi đăng comment")
+            return False
+            
+        job("Không tìm thấy comment nhưng không có lỗi, tạm chấp nhận")
+        return True
+    except Exception as e:
+        job(f"Lỗi verify comment: {str(e)}")
+        return False
+
+
+def complete_and_check_response(ads_id, account_id_val, job_type, link):
+    global previous_job_link
     try:
         json_data = {
             'ads_id': ads_id,
-            'account_id': account_id,
+            'account_id': account_id_val,
             'async': True,
             'data': None
         }
 
         response = session.post(
             'https://gateway.golike.net/api/advertising/publishers/tiktok/complete-jobs',
-            headers=headers, json=json_data, timeout=30)
-
-        # Parse response JSON
-        try:
-            resp_json = response.json()
-        except:
-            # Không parse được JSON
-            return False, f"HTTP {response.status_code} - Không parse được JSON"
-
-        # Luôn lấy message từ response
-        api_message = resp_json.get("message", "Không có message")
+            headers=headers, json=json_data)
 
         if response.status_code != 200:
-            return False, f"HTTP {response.status_code} - {api_message}"
+            return False, f"HTTP {response.status_code}"
 
-        if resp_json.get("status") != 200:
-            return False, api_message
-
-        return True, "success"
-
-    except requests.exceptions.Timeout:
-        return False, "Timeout - API không phản hồi"
-    except requests.exceptions.ConnectionError:
-        return False, "Lỗi kết nối - Kiểm tra mạng"
-    except Exception as e:
-        return False, f"Lỗi: {str(e)}"
-
-def call_api_skip(ads_id, object_id, account_id, job_type):
-    """Gọi API skip và trả về (success, message)"""
-    try:
-        json_data = {
-            'ads_id': ads_id, 
-            'object_id': object_id, 
-            'account_id': account_id, 
-            'type': job_type
-        }
+        resp_json = response.json()
+        message = resp_json.get("message", "")
         
-        response = session.post(
-            'https://gateway.golike.net/api/advertising/publishers/tiktok/skip-jobs',
-            headers=headers, json=json_data, timeout=30)
-
-        # Parse response JSON
-        try:
-            resp_json = response.json()
-        except:
-            return False, f"HTTP {response.status_code} - Không parse được JSON"
-
-        # Luôn lấy message từ response
-        api_message = resp_json.get("message", "Không có message")
-
-        if response.status_code != 200:
-            return False, f"HTTP {response.status_code} - {api_message}"
-
         if resp_json.get("status") != 200:
-            return False, api_message
+            if job_type == "comment" and any(kw in message.lower() for kw in ["vi phạm", "spam", "trùng", "không hợp lệ", "duplicate"]):
+                previous_job_link = link
+            return False, message
 
-        return True, "success"
-
-    except requests.exceptions.Timeout:
-        return False, "Timeout - API không phản hồi"
-    except requests.exceptions.ConnectionError:
-        return False, "Lỗi kết nối - Kiểm tra mạng"
+        return True, message
     except Exception as e:
-        return False, f"Lỗi: {str(e)}"
+        job(f"Exception khi hoàn thành nhiệm vụ: {str(e)}")
+        return False, str(e)
 
-def call_api_get_jobs(account_id):
-    """Gọi API lấy job và trả về (success, data, message)"""
-    try:
-        params = {'account_id': account_id, 'data': 'null'}
-        response = session.get(
-            'https://gateway.golike.net/api/advertising/publishers/tiktok/jobs',
-            headers=headers, params=params, timeout=30)
-
-        # Parse response JSON
-        try:
-            resp_json = response.json()
-        except:
-            return False, None, f"HTTP {response.status_code} - Không parse được JSON"
-
-        # Luôn lấy message từ response
-        api_message = resp_json.get("message", "Không có message")
-
-        if response.status_code != 200:
-            return False, None, f"HTTP {response.status_code} - {api_message}"
-
-        if resp_json.get("status") != 200:
-            return False, None, api_message
-
-        return True, resp_json.get("data"), "success"
-
-    except requests.exceptions.Timeout:
-        return False, None, "Timeout - API không phản hồi"
-    except requests.exceptions.ConnectionError:
-        return False, None, "Lỗi kết nối - Kiểm tra mạng"
-    except Exception as e:
-        return False, None, f"Lỗi: {str(e)}"
-
-def call_api_get_accounts():
-    """Gọi API lấy danh sách tài khoản và trả về (success, data, message)"""
-    try:
-        response = session.get(
-            'https://gateway.golike.net/api/tiktok-account', 
-            headers=headers, timeout=30)
-
-        # Parse response JSON
-        try:
-            resp_json = response.json()
-        except:
-            return False, None, f"HTTP {response.status_code} - Không parse được JSON"
-
-        # Luôn lấy message từ response
-        api_message = resp_json.get("message", "Không có message")
-
-        if response.status_code != 200:
-            return False, None, f"HTTP {response.status_code} - {api_message}"
-
-        if resp_json.get("status") != 200:
-            return False, None, api_message
-
-        return True, resp_json.get("data", []), "success"
-
-    except requests.exceptions.Timeout:
-        return False, None, "Timeout - API không phản hồi"
-    except requests.exceptions.ConnectionError:
-        return False, None, "Lỗi kết nối - Kiểm tra mạng"
-    except Exception as e:
-        return False, None, f"Lỗi: {str(e)}"
 
 def get_job_price(job_data):
     try:
@@ -1493,6 +1752,7 @@ def get_job_price(job_data):
         job(f"Lỗi lấy tiền nhiệm vụ: {str(e)}")
         return 5
 
+
 def process_tiktok_job(job_data):
     try:
         link = job_data["link"]
@@ -1502,137 +1762,69 @@ def process_tiktok_job(job_data):
 
         if action_type == "follow":
             if job_price < MIN_FOLLOW_PRICE:
-                return False, f"Giá thấp ({job_price}đ < {MIN_FOLLOW_PRICE}đ)", ads_id, job_price
+                return False, f"giá thấp hơn {MIN_FOLLOW_PRICE}", ads_id, job_price
 
         if action_type not in ["like", "follow", "comment", "favorite"]:
-            return False, f"Loại không hỗ trợ: {action_type}", None, 0
+            return False, "loại không hỗ trợ", None, 0
+
+        if not open_link(link):
+            return False, "mở link thất bại", ads_id, job_price
 
         success = False
         reason = ""
 
-        # Xử lý đặc biệt cho follow với 2 chế độ
-        if action_type == "follow" and FOLLOW_MODE == 2:
-            # Chế độ 2: Tìm kiếm username - KHÔNG ÉP DÙNG AXT
-            username = None
-            
-            # Thử lấy username từ link
-            if link:
-                match = re.search(r'@([^/?]+)', link)
-                if match:
-                    username = match.group(1)
-            
-            # Nếu không lấy được từ link, thử lấy từ job_data
-            if not username:
-                username = job_data.get("unique_username") or job_data.get("username") or job_data.get("object_name")
-            
-            if not username:
-                job("Không thể lấy username từ job data")
-                return False, "Không tìm thấy username", ads_id, job_price
-            
-            # Sử dụng hàm follow mới - KHÔNG ÉP DÙNG AXT
-            success = do_follow_via_search_natural(username)
-            reason = "Không tìm thấy username" if not success else "thành công"
-        else:
-            # Chế độ 1: Mở link
-            if not open_link(link):
-                return False, "Không thể mở link", ads_id, job_price
-
-            if action_type == "like":
-                success = do_like(device)
-                reason = "Không tìm thấy nút thích" if not success else "thành công"
-            elif action_type == "follow":
-                success = do_follow(device)
-                reason = "Không tìm thấy nút theo dõi" if not success else "thành công"
-            elif action_type == "favorite":
-                success = do_favorite(device)
-                reason = "Không tìm thấy nút yêu thích" if not success else "thành công"
-            elif action_type == "comment":
-                comment_text = (
-                    job_data.get("text") or
-                    job_data.get("description") or
-                    job_data.get("comment") or
-                    job_data.get("noidung")
-                )
-                if not comment_text:
-                    return False, "Thiếu nội dung bình luận", ads_id, job_price
-                # Sử dụng hàm comment mới - KHÔNG ÉP DÙNG AXT
-                success = do_comment_natural(device, comment_text, link)
-                reason = "Bình luận thất bại" if not success else "thành công"
+        if action_type == "like":
+            success = do_like(device)
+            reason = "thích thất bại" if not success else "thành công"
+        elif action_type == "follow":
+            success = do_follow(device)
+            reason = "theo dõi thất bại" if not success else "thành công"
+        elif action_type == "favorite":
+            success = do_favorite(device)
+            reason = "yêu thích thất bại" if not success else "thành công"
+        elif action_type == "comment":
+            comment_text = (
+                job_data.get("text") or
+                job_data.get("description") or
+                job_data.get("comment") or
+                job_data.get("noidung")
+            )
+            if not comment_text:
+                return False, "thiếu nội dung bình luận", ads_id, job_price
+            success = do_comment(device, comment_text, link)
+            reason = "bình luận thất bại" if not success else "thành công"
 
         if not success:
             return False, reason, ads_id, job_price
 
-        # Gọi API complete
-        complete_success, api_message = call_api_complete(ads_id, account_id)
-        
-        if complete_success:
+        success, complete_reason = complete_and_check_response(ads_id, account_id, action_type, link)
+        if success:
             save_link_job(link, action_type, "thành công", job_price)
-            return True, "success", ads_id, job_price
         else:
-            save_link_job(link, action_type, f"thất bại: {api_message}", job_price)
-            return False, api_message, ads_id, job_price
+            save_link_job(link, action_type, f"thất bại: {complete_reason}", job_price)
 
+        return success, complete_reason, ads_id, job_price
     except Exception as e:
         job(f"Exception trong process_tiktok_job: {str(e)}")
-        return False, f"Lỗi: {str(e)}", None, 0
+        return False, str(e), None, 0
+
 
 # Khởi tạo session
 session = requests.Session()
 headers = {}
 
-def banner():
-    clear_screen()
-    banner_text = """
-
-"""
-    for char in banner_text:
-        print(char, end='', flush=True)
-        time.sleep(0.00125)
 
 # --- MAIN CODE ---
 if __name__ == "__main__":
     if not init_files():
-        print("\033[1;31mKhông thể khởi tạo files chung! Thoát tool.\033[0m")
+        console.print("[red]✖ Không thể khởi tạo files chung! Thoát tool.[/]")
         sys.exit(1)
 
     banner()
-    print("\033[1;36mĐịa chỉ IP: 83.86.8888\033[0m")
-    print("\033[1;35m════════════════════════════════════════════════\033[0m")
-    print("\033[1;32mNhập 1 để vào Tool Tiktok\033[0m")
-    print("\033[1;31mNhập 2 để xóa Authorization hiện tại\033[0m")
-
-    while True:
-        try:
-            choose = input("\033[1;33mNhập lựa chọn (1 hoặc 2): \033[0m").strip()
-            choose = int(choose)
-            if choose not in [1, 2]:
-                print("\033[1;31mLựa chọn không hợp lệ! Hãy nhập lại.\033[0m")
-                continue
-            break
-        except (ValueError, EOFError):
-            print("\033[1;31mSai định dạng! Vui lòng nhập số.\033[0m")
-
-    if choose == 2:
-        if os.path.exists(AUTH_FILE):
-            try:
-                os.remove(AUTH_FILE)
-                print("\033[1;32mĐã xóa Authorization.txt!\033[0m")
-            except Exception as e:
-                print(f"\033[1;31mKhông thể xóa {AUTH_FILE}: {e}\033[0m")
-        else:
-            print("\033[1;33mFile Authorization.txt không tồn tại!\033[0m")
-        print("\033[1;33mVui lòng nhập lại thông tin!\033[0m")
-        choose = 1
-
-    author = read_auth()
-
-    while not author:
-        print("\033[1;35m════════════════════════════════════════════════\033[0m")
-        author = input("\033[1;33mNhập Authorization: \033[0m").strip()
-        if author:
-            save_auth(author)
-        else:
-            print("\033[1;31mAuthorization không được để trống!\033[0m")
+    console.print("[cyan]════════════════════════════════════════════════[/]")
+    
+    # Bước 1: Chọn Authorization
+    author = display_auth_menu()
 
     headers = {
         'Accept-Language': 'vi,en-US;q=0.9,en;q=0.8',
@@ -1649,40 +1841,95 @@ if __name__ == "__main__":
         'Content-Type': 'application/json;charset=utf-8'
     }
 
-    print("\033[1;35m════════════════════════════════════════════════\033[0m")
-    print("\033[1;32mĐăng nhập thành công! Đang vào Tool Tiktok...\033[0m")
+    console.print("[green]✓ Đăng nhập thành công![/]")
     time.sleep(1)
 
-    # Lấy danh sách tài khoản
-    accounts_success, accounts_data_list, accounts_message = call_api_get_accounts()
-    
-    if not accounts_success:
-        print(f"\033[1;31mLỗi lấy danh sách tài khoản: {accounts_message}\033[0m")
-        if logger:
-            logger.error(f"Lỗi lấy danh sách tài khoản: {accounts_message}")
-        sys.exit(1)
+    # API Functions
+    def chonacc():
+        try:
+            response = session.get('https://gateway.golike.net/api/tiktok-account', headers=headers)
+            resp_json = response.json()
+            
+            if resp_json.get("status") != 200:
+                msg = resp_json.get("message", "")
+                if logger:
+                    logger.error(f"Lấy danh sách tài khoản thất bại: {msg}")
+                return {"status": resp_json.get("status"), "message": msg, "data": []}
+            return resp_json
+        except Exception as e:
+            if logger:
+                logger.error(f"Lỗi chonacc: {str(e)}")
+            return {"status": 500, "message": str(e), "data": []}
 
-    if not accounts_data_list:
-        print("\033[1;31mKhông có tài khoản nào trong danh sách!\033[0m")
-        sys.exit(1)
+    def nhannv(account_id_val):
+        try:
+            params = {'account_id': account_id_val, 'data': 'null'}
+            response = session.get('https://gateway.golike.net/api/advertising/publishers/tiktok/jobs',
+                                   headers=headers, params=params)
+            resp_json = response.json()
+            
+            if resp_json.get("status") != 200:
+                msg = resp_json.get("message", "")
+                if logger:
+                    logger.warning(f"Nhận nhiệm vụ thất bại: {msg}")
+                return {"status": resp_json.get("status"), "message": msg}
+            return resp_json
+        except Exception as e:
+            if logger:
+                logger.error(f"Lỗi nhannv: {str(e)}")
+            return {"status": 500, "message": str(e)}
+
+    def baoloi(ads_id, object_id, account_id_val, loai):
+        try:
+            json_data = {'ads_id': ads_id, 'object_id': object_id, 'account_id': account_id_val, 'type': loai}
+            response = session.post('https://gateway.golike.net/api/advertising/publishers/tiktok/skip-jobs',
+                                    headers=headers, json=json_data)
+            resp_json = response.json()
+            
+            if resp_json.get("status") != 200:
+                msg = resp_json.get("message", "")
+                if logger:
+                    logger.warning(f"Báo lỗi thất bại: {msg}")
+                return {"status": resp_json.get("status"), "message": msg}
+            return resp_json
+        except Exception as e:
+            if logger:
+                logger.error(f"Lỗi baoloi: {str(e)}")
+            return {"status": 500, "message": str(e)}
+
+    # Bước 2: Chọn tài khoản TikTok
+    chontktiktok = chonacc()
 
     def dsacc():
-        banner()
-        print("\033[1;36mĐịa chỉ IP: 83.86.8888\033[0m")
-        print(f"\033[1;33mThiết bị: {device_serial if device_serial else 'Chưa kết nối'}\033[0m")
-        print("\033[1;35m════════════════════════════════════════════════\033[0m")
-        print("\033[1;32mDanh sách tài khoản Tik Tok:\033[0m")
-        print("\033[1;35m════════════════════════════════════════════════\033[0m")
-        for i, acc in enumerate(accounts_data_list):
-            print(f"\033[1;34m[{i+1}]\033[0m ID: {acc['unique_username']} | \033[1;32mHoạt động\033[0m")
-        print("\033[1;35m════════════════════════════════════════════════\033[0m")
+        global chontktiktok
+        while True:
+            try:
+                if chontktiktok.get("status") != 200:
+                    msg = chontktiktok.get("message", "")
+                    console.print(f"[red]{msg}[/]")
+                    if logger:
+                        logger.error(f"Authorization sai: {msg}")
+                    sys.exit()
+
+                banner()
+                console.print("[cyan]════════════════════════════════════════════════[/]")
+                console.print("[yellow]Danh sách tài khoản Tik Tok:[/]")
+                console.print("[cyan]════════════════════════════════════════════════[/]")
+                for i, acc in enumerate(chontktiktok["data"]):
+                    console.print(f"[cyan][{i+1}][/] [green]ID:[/] [yellow]{acc['unique_username']}[/] [dim]| Hoạt động[/]")
+                console.print("[cyan]════════════════════════════════════════════════[/]")
+                break
+            except Exception as e:
+                if logger:
+                    logger.error(f"Lỗi dsacc: {str(e)}")
+                time.sleep(10)
 
     dsacc()
 
     d = 0
     while True:
-        idacc = input("\033[1;32mNhập ID tài khoản Tiktok làm việc: \033[0m").strip()
-        for acc in accounts_data_list:
+        idacc = console.input("[cyan]✈ Nhập ID Tài Khoản Tiktok làm việc: [/]").strip()
+        for acc in chontktiktok["data"]:
             if acc["unique_username"] == idacc:
                 d = 1
                 account_id = acc["id"]
@@ -1692,262 +1939,143 @@ if __name__ == "__main__":
                     logger.info(f"Chọn account ID: {account_id}")
                 break
         if d == 0:
-            print("\033[1;31mTài khoản này chưa được thêm vào golike hoặc ID sai\033[0m")
+            console.print("[red]✖ Tài khoản này chưa được thêm vào golike hoặc ID sai[/]")
             continue
         break
 
-    while True:
-        try:
-            print("\033[1;35m════════════════════════════════════════════════\033[0m")
-            print("\033[1;32mLọc nhiệm vụ theo dõi theo tiền:\033[0m")
-            min_follow = input("\033[1;33mNhập giá theo dõi tối thiểu (vd: 12, nhập 0 để tắt lọc): \033[0m").strip()
-            MIN_FOLLOW_PRICE = float(min_follow) if '.' in min_follow else int(min_follow)
-            if logger:
-                logger.info(f"Giá theo dõi tối thiểu: {MIN_FOLLOW_PRICE}")
-            break
-        except ValueError:
-            print("\033[1;31mSai định dạng! Vui lòng nhập số.\033[0m")
+    # Bước 3: Cấu hình delay (MỚI - sau khi chọn ID TikTok)
+    console.print("[cyan]════════════════════════════════════════════════[/]")
+    console.print("[yellow]⚙️ CẤU HÌNH DELAY VÀ THÔNG SỐ[/]")
+    setup_delay_config()
 
-    while True:
-        try:
-            print("\033[1;35m════════════════════════════════════════════════\033[0m")
-            print("\033[1;32mChọn chế độ mở job FOLLOW:\033[0m")
-            print("\033[1;36m1: Mở qua link (package/deeplink) - giữ nguyên cách cũ\033[0m")
-            print("\033[1;36m2: Mở bằng tìm kiếm username (chỉ áp dụng cho job FOLLOW)\033[0m")
-            follow_mode_choice = input("\033[1;33mChọn chế độ (1 hoặc 2): \033[0m").strip()
-            follow_mode_choice = int(follow_mode_choice)
-            if follow_mode_choice in [1, 2]:
-                FOLLOW_MODE = follow_mode_choice
-                if logger:
-                    logger.info(f"Chế độ follow: {'Mở link' if FOLLOW_MODE == 1 else 'Tìm kiếm username'}")
-                break
-            else:
-                print("\033[1;31mVui lòng chọn 1 hoặc 2!\033[0m")
-        except ValueError:
-            print("\033[1;31mSai định dạng! Vui lòng nhập số.\033[0m")
+    # Bước 4: Chọn nhiệm vụ (MENU JOBS)
+    console.print("[cyan]════════════════════════════════════════════════[/]")
+    lam = menu_jobs()  # Trả về list các job id đã chọn: ["like", "follow", ...]
 
-    while True:
-        try:
-            print("\033[1;35m════════════════════════════════════════════════\033[0m")
-            print("\033[1;32mCấu hình FORCE STOP:\033[0m")
-            force_stop_choice = input("\033[1;33mBật force stop trước khi chạy? (1: Có / 0: Không): \033[0m").strip()
-            FORCE_STOP_BEFORE_RUN = (force_stop_choice == '1')
-            
-            force_stop_every = input("\033[1;33mSau bao nhiêu job thì force stop TikTok? (nhập số, 0 để tắt): \033[0m").strip()
-            FORCE_STOP_EVERY_JOB = int(force_stop_every) if force_stop_every.isdigit() else 20
-            
-            if logger:
-                logger.info(f"Force stop trước khi chạy: {FORCE_STOP_BEFORE_RUN}, reset sau {FORCE_STOP_EVERY_JOB} job")
-            break
-        except ValueError:
-            print("\033[1;31mSai định dạng! Vui lòng nhập số.\033[0m")
-
-    while True:
-        try:
-            base_delay = int(input("\033[1;33mNhập thời gian cơ bản (giây): \033[0m").strip())
-            delay_variation = int(input("\033[1;33mBiến thiên +- (giây): \033[0m").strip())
-            if logger:
-                logger.info(f"Cấu hình đợi: cơ bản={base_delay}, biến thiên={delay_variation}")
-            break
-        except ValueError:
-            print("\033[1;31mSai định dạng!!!\033[0m")
-
-    print("\033[1;35m════════════════════════════════════════════════\033[0m")
-    print("\033[1;32mChọn chế độ nhận nhiệm vụ:\033[0m")
-    print("\033[1;36m1: Chỉ theo dõi\033[0m")
-    print("\033[1;36m2: Chỉ thích\033[0m")
-    print("\033[1;36m3: Chỉ bình luận\033[0m")
-    print("\033[1;36m4: Chỉ yêu thích\033[0m")
-    print("\033[1;36m5: Thích + theo dõi\033[0m")
-    print("\033[1;36m6: Thích + bình luận\033[0m")
-    print("\033[1;36m7: Thích + yêu thích\033[0m")
-    print("\033[1;36m8: Theo dõi + bình luận\033[0m")
-    print("\033[1;36m9: Theo dõi + yêu thích\033[0m")
-    print("\033[1;36m10: Bình luận + yêu thích\033[0m")
-    print("\033[1;36m11: Thích + theo dõi + bình luận\033[0m")
-    print("\033[1;36m12: Thích + theo dõi + yêu thích\033[0m")
-    print("\033[1;36m13: Thích + bình luận + yêu thích\033[0m")
-    print("\033[1;36m14: Theo dõi + bình luận + yêu thích\033[0m")
-    print("\033[1;36m15: Thích + theo dõi + bình luận + yêu thích\033[0m")
-
-    valid_choices = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
-
-    while True:
-        try:
-            chedo = int(input("\033[1;33mChọn chế độ (1-15): \033[0m").strip())
-            if chedo in valid_choices:
-                if logger:
-                    logger.info(f"Chọn chế độ: {chedo}")
-                break
-            else:
-                print("\033[1;31mVui lòng chọn từ 1 đến 15!\033[0m")
-        except ValueError:
-            print("\033[1;31mNhập số hợp lệ!\033[0m")
-
-    if chedo == 1:
-        lam = ["follow"]
-    elif chedo == 2:
-        lam = ["like"]
-    elif chedo == 3:
-        lam = ["comment"]
-    elif chedo == 4:
-        lam = ["favorite"]
-    elif chedo == 5:
-        lam = ["like", "follow"]
-    elif chedo == 6:
-        lam = ["like", "comment"]
-    elif chedo == 7:
-        lam = ["like", "favorite"]
-    elif chedo == 8:
-        lam = ["follow", "comment"]
-    elif chedo == 9:
-        lam = ["follow", "favorite"]
-    elif chedo == 10:
-        lam = ["comment", "favorite"]
-    elif chedo == 11:
-        lam = ["like", "follow", "comment"]
-    elif chedo == 12:
-        lam = ["like", "follow", "favorite"]
-    elif chedo == 13:
-        lam = ["like", "comment", "favorite"]
-    elif chedo == 14:
-        lam = ["follow", "comment", "favorite"]
-    else:
-        lam = ["like", "follow", "comment", "favorite"]
-
-    print("\033[1;35m════════════════════════════════════════════════\033[0m")
-    print("\033[1;32mHoàn tất cấu hình nhiệm vụ!\033[0m")
-    print(f"\033[1;36mCác loại nhiệm vụ sẽ làm: {', '.join(lam)}\033[0m")
-    print(f"\033[1;36mChế độ follow: {'Mở link' if FOLLOW_MODE == 1 else 'Tìm kiếm username'}\033[0m")
-    print(f"\033[1;36mForce stop trước khi chạy: {'CÓ' if FORCE_STOP_BEFORE_RUN else 'KHÔNG'}\033[0m")
-    print(f"\033[1;36mReset TikTok sau mỗi {FORCE_STOP_EVERY_JOB} job\033[0m")
-    print("\033[1;33mTiến hành kết nối thiết bị ADB...\033[0m")
-
-    time.sleep(1)
+    # Bước 5: Kết nối thiết bị ADB
+    console.print("[cyan]════════════════════════════════════════════════[/]")
+    console.print("[yellow]Tiến hành kết nối thiết bị ADB...[/]")
 
     if not select_device():
-        print("\033[1;31mKhông thể kết nối thiết bị. Thoát tool!\033[0m")
+        console.print("[red]✖ Không thể kết nối thiết bị. Thoát tool![/]")
         if logger:
             logger.error("Không thể kết nối thiết bị, thoát tool")
         sys.exit(1)
 
-    accounts_data[account_id]["devices"] = device_serial
+    # Khởi tạo dashboard thread
+    dashboard_thread = threading.Thread(target=run_dashboard, daemon=True)
+    dashboard_thread.start()
+    time.sleep(1)
 
-    # ===== BIẾN ĐẾM JOB TOÀN CỤC =====
-    job_count = 0
+    # Cập nhật device cho account
+    update_account_status(account_id, "Đã kết nối")
+    update_current_link(account_id, "Chưa có job")
 
-    # ===== FORCE STOP TRƯỚC KHI CHẠY (NẾU BẬT) =====
-    if FORCE_STOP_BEFORE_RUN:
-        update_account_status(account_id, "Đang force stop TikTok...")
-        with Live(update_dashboard(), console=console, refresh_per_second=2, screen=True) as live:
-            live.update(update_dashboard())
+    # --- LOOP CHÍNH VỚI DASHBOARD ---
+    try:
+        if FORCE_STOP_ENABLED:
+            force_stop_tiktok()
         
-        force_stop_tiktok()
-        open_tiktok_after_force_stop()
+        start_tiktok_and_wait()
         
-        time.sleep(1)
-
-    # ===== VÒNG LẶP CHÍNH =====
-    with Live(update_dashboard(), console=console, refresh_per_second=2, screen=True) as live:
         while True:
             update_account_status(account_id, "Đang tìm nhiệm vụ...")
-            live.update(update_dashboard())
+            
+            # Delay trước khi lấy job
+            time.sleep(get_random_delay_job('job'))
 
-            # Gọi API lấy job
-            job_success, job_data, job_message = call_api_get_jobs(account_id)
+            nhanjob = {}
+            while True:
+                try:
+                    nhanjob = nhannv(account_id)
+                    break
+                except:
+                    time.sleep(1)
 
-            if job_success:
-                if not job_data or not job_data.get("link"):
-                    update_account_status(account_id, f"Không có job - {job_message}")
-                    live.update(update_dashboard())
-                    time.sleep(2)
+            if nhanjob.get("status") == 200:
+                data = nhanjob.get("data")
+                if not data or not data.get("link"):
+                    if "message" in nhanjob:
+                        update_account_status(account_id, nhanjob['message'])
+                    time.sleep(1)
                     continue
 
-                current_link = job_data.get("link")
-                with open(LINK_JOB_FILE, 'w', encoding='utf-8') as f:
-                    f.write(current_link)
+                current_link = data.get("link")
+                # CHỈ cập nhật link hiện tại vào dashboard, KHÔNG lưu vào file link_job
+                update_current_link(account_id, current_link)
 
+                # Kiểm tra link đã xử lý thành công chưa
                 if is_link_processed(current_link):
-                    skip_success, skip_message = call_api_skip(
-                        job_data["id"], job_data["object_id"], account_id, job_data["type"]
-                    )
-                    if not skip_success:
-                        job(f"Báo lỗi thất bại: {skip_message}")
-                    
-                    update_account_status(account_id, f"Job đã làm rồi - {skip_message if not skip_success else 'Đã báo lỗi'}")
-                    live.update(update_dashboard())
-                    time.sleep(1)
+                    try:
+                        result = baoloi(data["id"], data["object_id"], account_id, data["type"])
+                        if result.get("status") != 200:
+                            msg = result.get("message", "")
+                            update_account_status(account_id, msg)
+                    except:
+                        pass
                     continue
 
-                if job_data["type"] not in lam:
-                    skip_success, skip_message = call_api_skip(
-                        job_data["id"], job_data["object_id"], account_id, job_data["type"]
-                    )
-                    if not skip_success:
-                        job(f"Báo lỗi thất bại: {skip_message}")
-                    
-                    update_account_status(account_id, f"Bỏ qua job {job_data['type']} - {skip_message if not skip_success else 'Đã báo lỗi'}")
-                    live.update(update_dashboard())
-                    time.sleep(1)
-                    continue
+                # Kiểm tra job type có trong danh sách đã chọn không
+                if data["type"] not in lam:
+                    try:
+                        result = baoloi(data["id"], data["object_id"], account_id, data["type"])
+                        if result.get("status") != 200:
+                            msg = result.get("message", "")
+                            update_account_status(account_id, msg)
+                        time.sleep(1)
+                        continue
+                    except:
+                        pass
 
                 status_map = {
-                    "follow": "Đang theo dõi...",
-                    "like": "Đang thích...",
-                    "comment": "Đang bình luận...",
-                    "favorite": "Đang thêm yêu thích..."
+                    "follow": "Đang follow...",
+                    "like": "Đang like...",
+                    "comment": "Đang comment...",
+                    "favorite": "Đang favorite..."
                 }
-                update_account_status(account_id, status_map.get(job_data["type"], f"Đang xử lý {job_data['type']}..."))
-                live.update(update_dashboard())
+                update_account_status(account_id, status_map.get(data["type"], f"Đang xử lý {data['type']}..."))
 
-                success, reason, job_ads_id, job_price = process_tiktok_job(job_data)
+                success, reason, job_ads_id, job_price = process_tiktok_job(data)
 
                 if success:
-                    update_account_stats(account_id, job_data["type"], job_price, success=True)
+                    job_count += 1
+                    update_account_stats(account_id, data["type"], job_price, success=True)
                     update_account_status(account_id, f"Hoàn thành - +{job_price}đ")
-                    live.update(update_dashboard())
 
-                    delay = get_random_delay()
+                    if FORCE_STOP_AFTER > 0 and job_count >= FORCE_STOP_AFTER:
+                        job(f"[{device_serial}] Đã hoàn thành {job_count} job -> Force Stop")
+                        update_account_status(account_id, f"Đã làm {job_count} job -> Force Stop...")
+                        force_stop_tiktok()
+                        job_count = 0
+                        start_tiktok_and_wait()
+                    
+                    # Sử dụng delay_done từ config
+                    delay = delay_config['delay_done']
                     for remaining_time in range(delay, 0, -1):
                         update_account_status(account_id, f"Đợi {remaining_time}s...")
-                        live.update(update_dashboard())
                         time.sleep(1)
-                    
-                    # Tăng biến đếm job
-                    job_count += 1
-                    
                 else:
-                    update_account_stats(account_id, job_data["type"], 0, success=False)
-                    # Hiển thị message thật từ API hoặc lỗi thực tế
-                    update_account_status(account_id, f"Thất bại - {reason}")
-                    live.update(update_dashboard())
+                    update_account_stats(account_id, data["type"], 0, success=False)
+                    update_account_status(account_id, reason)
 
-                    # Gọi API báo lỗi
-                    skip_success, skip_message = call_api_skip(
-                        job_data["id"], job_data["object_id"], account_id, job_data["type"]
-                    )
-                    if not skip_success:
-                        job(f"Báo lỗi thất bại: {skip_message}")
-                    
+                    try:
+                        result = baoloi(data["id"], data["object_id"], account_id, data["type"])
+                        if result.get("status") != 200:
+                            msg = result.get("message", "")
+                            job(f"Báo lỗi thất bại: {msg}")
+                    except:
+                        pass
                     time.sleep(1)
-
-                # ===== KIỂM TRA VÀ FORCE STOP SAU X JOB =====
-                if FORCE_STOP_EVERY_JOB > 0 and job_count >= FORCE_STOP_EVERY_JOB:
-                    update_account_status(account_id, f"Reset TikTok sau {job_count} job...")
-                    live.update(update_dashboard())
-                    
-                    # Force stop và mở lại TikTok
-                    force_stop_tiktok()
-                    open_tiktok_after_force_stop()
-                    
-                    # Reset biến đếm
-                    job_count = 0
-                    
-                    # Đợi một chút sau khi reset
-                    time.sleep(2)
-
             else:
-                # Hiển thị message từ API khi lỗi
-                update_account_status(account_id, f"Lỗi API: {job_message}")
-                live.update(update_dashboard())
-                time.sleep(5)
+                error_msg = nhanjob.get("message", "")
+                update_account_status(account_id, error_msg)
+                time.sleep(10)
+                
+    except KeyboardInterrupt:
+        console.print("\n[yellow]⚠ Đã dừng tool bởi người dùng![/]")
+        if logger:
+            logger.info("Tool đã dừng bởi người dùng")
+    except Exception as e:
+        console.print(f"\n[red]✖ Lỗi không xác định: {e}[/]")
+        if logger:
+            logger.error(f"Lỗi không xác định: {e}")
