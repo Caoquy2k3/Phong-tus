@@ -5,7 +5,7 @@ import sys
 import time
 import json
 import requests
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 import subprocess
 import uiautomator2 as u2
 import random
@@ -29,16 +29,23 @@ import cv2
 import numpy as np
 import urllib.request
 
+# ==================== CẤU HÌNH MÚI GIỜ VIỆT NAM CHUẨN ====================
+# 1. Set TZ cho môi trường Linux/Termux (tương thích tốt)
+os.environ['TZ'] = 'Asia/Ho_Chi_Minh'
+if hasattr(time, 'tzset'):
+    time.tzset()
+
+# 2. Tạo chuẩn múi giờ Việt Nam (UTC+7) cố định cho MỌI HỆ ĐIỀU HÀNH
+VN_TZ = timezone(timedelta(hours=7))
+
+def get_vn_time():
+    """Hàm lấy giờ VN chuẩn, dùng để thay thế cho datetime.now() mặc định"""
+    return datetime.now(VN_TZ)
+# ======================================================================
+
 # Tạo thư mục data nếu chưa tồn tại
 DATA_DIR = "data"
 os.makedirs(DATA_DIR, exist_ok=True)
-
-# Cấu hình múi giờ
-os.environ['TZ'] = 'Asia/Ho_Chi_Minh'
-try:
-    time.tzset()
-except:
-    pass
 
 # Biến toàn cục
 device = None
@@ -112,7 +119,6 @@ def banner():
 \033[38;2;190;235;210m───────────────────────────────────────────────────────────────────────\033[0m
 """
     print(banner_text)
-
 
 
 def check_and_download_gui():
@@ -617,7 +623,7 @@ def make_layout():
     layout["title"].update(
         Align.center(
             Panel(
-                "[bold cyan]TOOL GOLIKE TIKTOK BOXPHONE - BY: DAO CAO NGUYEN[/bold cyan]",
+                "[bold cyan]TOOL GOLIKE TIKTOK BOXPHONE - BY: PHONG Tus[/bold cyan]",
                 style="bright_yellow",
                 box=box.DOUBLE
             )
@@ -807,7 +813,8 @@ def init_instance_files(serial):
                         json.dump({"processed_videos": []}, f)
                 elif file == LOG_FILE:
                     with open(file, 'w', encoding='utf-8') as f:
-                        f.write(f"# Log file - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} - Thiết bị: {serial}\n")
+                        current_time = get_vn_time().strftime('%Y-%m-%d %H:%M:%S')
+                        f.write(f"# Log file - {current_time} - Thiết bị: {serial}\n")
                 elif file == CHECK_CMT_FILE:
                     with open(file, 'w', encoding='utf-8') as f:
                         json.dump({"last_comment": "", "history": []}, f)
@@ -1073,7 +1080,7 @@ def save_comment(comment, status="sent"):
         
         data['last_comment'] = comment
         data['last_status'] = status
-        data['last_time'] = datetime.now().isoformat()
+        data['last_time'] = get_vn_time().isoformat()
         
         if 'history' not in data:
             data['history'] = []
@@ -1081,7 +1088,7 @@ def save_comment(comment, status="sent"):
         data['history'].append({
             'comment': comment,
             'status': status,
-            'timestamp': datetime.now().isoformat()
+            'timestamp': get_vn_time().isoformat()
         })
         
         # Giữ lại tối đa 100 comment
@@ -1213,35 +1220,55 @@ def check_tiktok_installed():
 
 
 def force_stop_tiktok():
-    """Buộc dừng TikTok"""
+    """Buộc dừng TikTok (Fix click quá nhanh & thử lại 3 lần)"""
     global device, device_serial
     
-    msg = f"[{device_serial}] Chuẩn bị buộc dừng TikTok"
+    msg = f"[{device_serial}] Chuẩn bị buộc dừng TikTok..."
     job(msg)
     update_account_status(account_id, f"Force Stop TikTok...")
     
     pkg = TIKTOK_PACKAGE
     device.shell(f"am start -a android.settings.APPLICATION_DETAILS_SETTINGS -d package:{pkg}")
     
+    # Chờ load UI cài đặt (Quan trọng: chờ lâu một chút để máy yếu kịp load)
+    time.sleep(2.5) 
+    
     if device(textMatches="(?i)(Buộc dừng|Buộc đóng|Force stop)").wait(timeout=10):
-        time.sleep(1)
-        
-        btn_stop = device(resourceIdMatches=".*(?i)(force_stop|stop_button).*")
-        
-        if not btn_stop.exists:
-            btn_stop = device(textMatches="(?i)(Buộc dừng|Buộc đóng|Force stop)")
-        
-        if btn_stop.exists and btn_stop.info.get('enabled', False):
-            job(f"[{device_serial}] App đang chạy -> Buộc dừng")
-            update_account_status(account_id, f"Đang Force Stop...")
-            btn_stop.click()
+        for attempt in range(3):  # Cho phép thử click tối đa 3 lần
+            # Tìm nút Buộc dừng
+            btn_stop = device(resourceIdMatches=".*(?i)(force_stop|stop_button).*")
+            if not btn_stop.exists:
+                btn_stop = device(textMatches="(?i)(Buộc dừng|Buộc đóng|Force stop)")
             
-            btn_ok = device(resourceId="android:id/button1")
-            if btn_ok.wait(timeout=3):
-                btn_ok.click()
-                job(f"[{device_serial}] Đã Force Stop TikTok thành công")
-        else:
-            job(f"[{device_serial}] App đã dừng từ trước")
+            # Kiểm tra nút có sáng lên (bấm được) không
+            if btn_stop.exists and btn_stop.info.get('enabled', False):
+                job(f"[{device_serial}] Đang bấm Buộc dừng (Lần {attempt+1})...")
+                btn_stop.click()
+                
+                # Cực kỳ quan trọng: Chờ popup xác nhận hiện lên
+                time.sleep(2) 
+                
+                # Tìm và bấm nút OK/Đồng ý trong popup
+                btn_ok = device(resourceId="android:id/button1")
+                if not btn_ok.exists:
+                    btn_ok = device(textMatches="(?i)(ok|đồng ý|xác nhận)")
+                    
+                if btn_ok.wait(timeout=3):
+                    btn_ok.click()
+                    job(f"[{device_serial}] Đã Force Stop TikTok thành công!")
+                    time.sleep(2)  # Chờ app tắt hẳn rồi mới làm việc khác
+                    return  # Thành công thì thoát hàm luôn
+                else:
+                    job(f"[{device_serial}] Chưa thấy nút OK, thử lại...")
+                    time.sleep(1)  # Chờ một chút trước khi thử lại
+            else:
+                job(f"[{device_serial}] App đã dừng từ trước (Nút bị mờ)")
+                time.sleep(1)
+                return
+        
+        job(f"[{device_serial}] ⚠ Đã thử 3 lần nhưng không thể Force Stop hoàn toàn.")
+    else:
+        job(f"[{device_serial}] ⚠ Không tìm thấy nút Buộc dừng trong cài đặt.")
     
     time.sleep(1)
 
