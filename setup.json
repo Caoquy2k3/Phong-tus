@@ -1,1 +1,8 @@
-pkg update -y && pkg upgrade -y && pkg install python tur-repo x11-repo dbus termux-api opencv ffmpeg opencv-python chromium -y && pip install requests selenium rich bs4 numpy uiautomator2 adbutils --break-system-packages && termux-setup-storage
+{
+  "setup": [
+    "pkg update -y && pkg upgrade -y",
+    "pkg install python tur-repo x11-repo dbus termux-api opencv ffmpeg opencv-python chromium -y",
+    "pip install requests selenium rich bs4 numpy uiautomator2 adbutils --break-system-packages",
+    "termux-setup-storage"
+  ]
+}
