@@ -761,9 +761,9 @@ def create_menu_table():
     table.add_column("STT", justify="center", style="#00ffff", width=5)
     table.add_column("CHỨC NĂNG", justify="left", width=60)
     modes = [
-        ("1", "[#ffffff]Auto Golike [#ff9ecb]Instagram[/] [#a5f3fc](cookie)[/]"),
+        ("1", "[#ffffff]Auto Golike [#ff9ecb]Instagram[/] [#a5f3fc]cookie[/]"),
         ("2", "[#ffffff]Auto Golike [bold #00ffff]TikTok[/] [#ffd54f]ADB[/] [#ffffff]full job[/] [bold #ff9ecb]Like[/] [bold #00ff9c]Follow[/] [bold #38bdf8]Cmt[/] [bold #a78bfa]Favorites[/]"),
-        ("3", "[#ffffff]Tool 3 - Đang phát triển[/]"),
+        ("3", "[#ffffff]Auto Golike [bold #38bdf8]Instagram[/] [bold #ff9ecb]selenium[/]"),
         ("4", "[#ffffff]Tool 4 - Đang phát triển[/]"), 
         ("5", "[#ffffff]Tool 5 - Đang phát triển[/]"),
         ("6", "[#ffffff]Tool 6 - Đang phát triển[/]")
@@ -888,7 +888,7 @@ def check_license_and_run():
 RAW_LINKS = {
     "1": "https://raw.githubusercontent.com/Caoquy2k3/Phong-tus/main/ig.py",
     "2": "https://raw.githubusercontent.com/Caoquy2k3/Phong-tus/main/ttnew.py",
-    "3": "https://raw.githubusercontent.com/Caoquy2k3/Phong-tus/main/Adbsnap.py",
+    "3": "https://raw.githubusercontent.com/Caoquy2k3/Phong-tus/refs/heads/main/igchrome.py",
     "4": "https://raw.githubusercontent.com/Caoquy2k3/Phong-tus/main/Igadb.py",
     "5": "https://raw.githubusercontent.com/Caoquy2k3/Phong-tus/main/AdbPinterest.py",
     "6": "https://raw.githubusercontent.com/Caoquy2k3/Phong-tus/main/tool6.py",
