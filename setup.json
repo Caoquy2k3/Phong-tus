@@ -1,10 +1,13 @@
 {
   "setup": [
-    "pkg update -y && pkg upgrade -y",
+    "pkg update -y",
+    "pkg upgrade -y",
     "pkg install tur-repo x11-repo -y",
     "pkg install python git termux-api dbus ffmpeg opencv python-numpy -y",
+    "python3 -c \"import os; v=int(os.popen('getprop ro.build.version.sdk').read().strip()); os.system('pkg install chromium -y') if v>=30 else None\"",
     "pip install --upgrade pip setuptools wheel --break-system-packages",
-    "pip install requests selenium rich bs4 uiautomator2 adbutils --break-system-packages",
+    "pip install requests selenium rich bs4 --break-system-packages",
+    "pip install uiautomator2 adbutils --break-system-packages",
     "termux-setup-storage"
   ]
 }
