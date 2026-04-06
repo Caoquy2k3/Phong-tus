@@ -6,4 +6,5 @@
     "pip install --upgrade pip setuptools wheel --break-system-packages",
     "pip install requests selenium rich bs4 uiautomator2 adbutils --break-system-packages",
     "termux-setup-storage",
+  ]
 }
