@@ -909,7 +909,7 @@ def setup_delay_config():
     delay_done = delay_config['delay_done']
     force_stop = "Yes" if FORCE_STOP_ENABLED else "No"
     stop_job = FORCE_STOP_AFTER
-
+    
     while True:
         table = Table(
             title="[#ffffff]Delay [#00ffff]Config[/]",
@@ -961,6 +961,7 @@ def setup_delay_config():
         )
 
         console.clear()
+        banner()
         console.print(table)
 
         console.print(
@@ -1120,9 +1121,9 @@ def get_battery_from_adb(device_obj):
 
 def show_devices_with_rich():
     console.clear()
-    
+    banner()
     table = Table(
-        title="[bold #ffffff]📱 DANH SÁCH THIẾT BỊ ADB[/]",
+        title="[bold #ffffff] DANH SÁCH THIẾT BỊ ADB[/]",
         border_style="#d7d7a8",
         show_lines=True,
         expand=False,
@@ -2043,7 +2044,7 @@ if __name__ == "__main__":
         sys.exit(1)
 
     console.print("[cyan]════════════════════════════════════════════════[/]")
-    console.print("[yellow]⚙️ CẤU HÌNH DELAY VÀ THÔNG SỐ[/]")
+    console.print("[yellow] CẤU HÌNH DELAY VÀ THÔNG SỐ[/]")
     setup_delay_config()
 
     console.print("[cyan]════════════════════════════════════════════════[/]")
@@ -2053,7 +2054,7 @@ if __name__ == "__main__":
     console.print("[yellow]Tiến hành kết nối thiết bị ADB...[/]")
 
     if not select_device():
-        console.print("[red]✖ Không thể kết nối thiết bị. Thoát tool![/]")
+        console.print("[red] Không thể kết nối thiết bị. Thoát tool![/]")
         if logger:
             logger.error("Không thể kết nối thiết bị, thoát tool")
         sys.exit(1)
@@ -2069,7 +2070,7 @@ if __name__ == "__main__":
 
     if FORCE_STOP_ENABLED:
         update_account_status(temp_account_id, "Đang Force Stop TikTok...")
-        console.print("[yellow]🔄 Đang thực hiện Force Stop TikTok theo cấu hình...[/]")
+        console.print("[yellow] Đang thực hiện Force Stop TikTok theo cấu hình...[/]")
         force_stop_tiktok()
         time.sleep(1.5)
         update_account_status(temp_account_id, "Force Stop xong, đang mở lại TikTok...")
@@ -2111,7 +2112,7 @@ if __name__ == "__main__":
                 
     if not is_matched:
         error_msg = f"Username lấy được ({auto_username}) không có trong danh sách Golike!"
-        console.print(f"[red]✖ {error_msg}[/red]")
+        console.print(f"[red] {error_msg}[/red]")
         console.print("[yellow]Vui lòng thêm tài khoản TikTok này vào Golike hoặc kiểm tra lại.[/yellow]")
         update_account_status(temp_account_id, error_msg)
         time.sleep(5)
@@ -2229,8 +2230,8 @@ if __name__ == "__main__":
             logger.info("Tool đã dừng bởi người dùng")
     except Exception as e:
         if "STOP_FLAG" in str(e):
-            console.print("\n[yellow]⚠ Tool đã được yêu cầu dừng khẩn cấp![/]")
+            console.print("\n[yellow] Tool đã được yêu cầu dừng khẩn cấp![/]")
         else:
-            console.print(f"\n[red]✖ Lỗi không xác định: {e}[/]")
+            console.print(f"\n[red] Lỗi không xác định: {e}[/]")
         if logger:
             logger.error(f"Lỗi không xác định: {e}")
