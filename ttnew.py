@@ -56,26 +56,288 @@ def check_stop():
         if STOP_FLAG:
             raise Exception("STOP_FLAG triggered - Dừng khẩn cấp")
 
+def check_stop_safe():
+    with STOP_LOCK:
+        return STOP_FLAG
+
+# ==================== TỐI ƯU HIỆU NĂNG CHO MÁY YẾU ====================
+# Cache cho UI dump để tránh dump liên tục
+_ui_dump_cache = {"xml": "", "timestamp": 0, "nodes": []}
+_UI_DUMP_CACHE_TTL = 0.3  # 300ms cache
+
+# Chế độ tiết kiệm tài nguyên cho máy yếu
+LIGHT_MODE = False
+DEVICE_RAM_MB = 0
+
+def detect_device_performance(d=None):
+    """Phát hiện cấu hình máy để tự động điều chỉnh"""
+    global LIGHT_MODE, DEVICE_RAM_MB
+    
+    try:
+        if d:
+            mem_info = d.shell("cat /proc/meminfo 2>/dev/null | grep MemTotal")
+            if mem_info:
+                match = re.search(r'(\d+)', mem_info)
+                if match:
+                    DEVICE_RAM_MB = int(match.group(1)) // 1024
+        else:
+            DEVICE_RAM_MB = 2048
+    except:
+        DEVICE_RAM_MB = 2048
+    
+    if DEVICE_RAM_MB <= 2048:
+        LIGHT_MODE = True
+        add_response_message(f"⚡ Chế độ nhẹ BẬT (RAM: {DEVICE_RAM_MB}MB)")
+    else:
+        add_response_message(f"RAM: {DEVICE_RAM_MB}MB - Chế độ bình thường")
+    
+    return LIGHT_MODE
+
 def wait_for_ui_stable(d, wait_time=2.5, extra_wait=0.5):
+    """Phiên bản tối ưu - giảm thời gian chờ cho máy yếu"""
     check_stop()
-    time.sleep(wait_time)
+    
+    if LIGHT_MODE:
+        wait_time = max(0.8, wait_time * 0.6)
+        extra_wait = max(0.1, extra_wait * 0.3)
+    
+    remaining = wait_time
+    while remaining > 0 and not check_stop_safe():
+        sleep_chunk = min(0.1, remaining)
+        time.sleep(sleep_chunk)
+        remaining -= sleep_chunk
+    
     if extra_wait > 0:
-        time.sleep(extra_wait)
+        remaining_extra = extra_wait
+        while remaining_extra > 0 and not check_stop_safe():
+            sleep_chunk = min(0.1, remaining_extra)
+            time.sleep(sleep_chunk)
+            remaining_extra -= sleep_chunk
+    
     check_stop()
     return True
 
 def wait_for_element(d, selector, timeout=10, check_interval=0.5):
     start = time.time()
+    
+    if LIGHT_MODE:
+        check_interval = 0.25
+    
     while time.time() - start < timeout:
         check_stop()
         try:
             elem = d(**selector) if isinstance(selector, dict) else selector
-            if elem.exists(timeout=0.5):
+            if elem.exists(timeout=0.3):
                 return elem
         except Exception:
             pass
         time.sleep(check_interval)
     return None
+
+# ==================== HÀM WAIT AND CLICK HỖ TRỢ ====================
+def wait_and_click(d, selectors, timeout=5, check_interval=0.3):
+    """Chờ và click vào element đầu tiên tìm thấy"""
+    start_time = time.time()
+    while time.time() - start_time < timeout:
+        if check_stop_safe():
+            return False
+        for selector in selectors:
+            try:
+                obj = d(**selector)
+                if obj.exists(timeout=0.2):
+                    obj.click()
+                    return True
+            except Exception:
+                continue
+        time.sleep(check_interval)
+    return False
+
+# ==================== HÀM SHARE VÀ COPY LINK ====================
+def do_share_and_copy_link(d, max_retry=2):
+    """Thực hiện share video và copy link"""
+    try:
+        add_response_message(" Đang thử Share và Copy Link...")
+        
+        time.sleep(0.5)
+        
+        share_selectors = [
+            {"descriptionContains": "share"},
+            {"descriptionContains": "gửi"},
+            {"descriptionContains": "chia sẻ"},
+            {"textContains": "Share"},
+            {"textContains": "Gửi"},
+            {"resourceIdMatches": ".*share.*"}
+        ]
+        
+        share_clicked = False
+        for selector in share_selectors:
+            try:
+                obj = d(**selector)
+                if obj.exists(timeout=0.5):
+                    obj.click()
+                    share_clicked = True
+                    add_response_message(" Đã click nút Share")
+                    break
+            except Exception:
+                continue
+        
+        if not share_clicked:
+            add_response_message(" Không tìm thấy nút Share")
+            return False
+        
+        time.sleep(0.8)
+        
+        copy_selectors = [
+            {"text": "Sao chép liên kết"},
+            {"textContains": "Sao chép"},
+            {"textContains": "liên kết"},
+            {"text": "Copy link"},
+            {"textContains": "Copy"},
+            {"textContains": "link"},
+            {"descriptionContains": "copy"},
+            {"descriptionContains": "link"},
+            {"text": "Sao chép"}
+        ]
+        
+        copy_clicked = False
+        for selector in copy_selectors:
+            try:
+                obj = d(**selector)
+                if obj.exists(timeout=0.5):
+                    obj.click()
+                    copy_clicked = True
+                    add_response_message(" Đã Copy Link thành công!")
+                    break
+            except Exception:
+                continue
+        
+        if not copy_clicked:
+            add_response_message(" Không tìm thấy nút Copy Link")
+            d.click(100, 100)
+            return False
+        
+        time.sleep(0.5)
+        d.press("back")
+        
+        return True
+        
+    except Exception as e:
+        add_response_message(f" Lỗi khi Share/Copy Link: {str(e)}")
+        return False
+
+# ==================== HÀM NUÔI NICK NÂNG CAO ====================
+def nuoi_nick_short(d, num_videos=2, share_rate=15, is_high_trust_mode=False):
+    """Lướt nhẹ trang chủ vài video để nuôi acc, tăng độ tin cậy"""
+    try:
+        if is_high_trust_mode:
+            share_rate = random.randint(30, 50)
+            add_response_message(f" [CHẾ ĐỘ TĂNG TRUST] Đang lướt nuôi nick ({num_videos} video)...")
+        else:
+            add_response_message(f" Đang lướt trang chủ nuôi nick ({num_videos} video, tỷ lệ copy link {share_rate}%)...")
+        
+        for _ in range(1):
+            d.press("back")
+            time.sleep(0.2)
+        
+        time.sleep(0.8)
+        
+        try:
+            home_tab = d(text="Home", resourceIdMatches=".*tab.*")
+            if home_tab.exists:
+                home_tab.click()
+                time.sleep(0.5)
+        except:
+            pass
+        
+        success_share_count = 0
+        
+        if LIGHT_MODE:
+            min_watch, max_watch = 3, 8
+        else:
+            min_watch, max_watch = 5, 12
+        
+        for i in range(num_videos):
+            if check_stop_safe():
+                break
+            
+            watch_time = random.uniform(min_watch, max_watch)
+            add_response_message(f" Xem video {i+1}/{num_videos} ({watch_time:.0f}s)")
+            
+            remaining = watch_time
+            while remaining > 0 and not check_stop_safe():
+                sleep_time = min(0.5, remaining)
+                time.sleep(sleep_time)
+                remaining -= sleep_time
+            
+            if check_stop_safe():
+                break
+            
+            should_share = random.randint(1, 100) <= share_rate
+            
+            if should_share:
+                add_response_message(f"🎲 Video {i+1}: Thử Share và Copy Link...")
+                if do_share_and_copy_link(d):
+                    success_share_count += 1
+                time.sleep(random.uniform(0.8, 1.5))
+            
+            w, h = d.window_size()
+            x_mid = int(w * 0.5)
+            start_y = int(h * 0.85)
+            end_y = int(h * 0.2)
+            d.swipe(x_mid, start_y, x_mid, end_y, duration=random.uniform(0.15, 0.3))
+            
+            time.sleep(random.uniform(0.5, 1.0))
+        
+        if success_share_count > 0:
+            add_response_message(f" Đã hoàn thành lướt video nuôi nick (Đã Share/Copy {success_share_count} link)")
+        else:
+            add_response_message(" Đã hoàn thành lướt video nuôi nick")
+        
+        return success_share_count
+        
+    except Exception as e:
+        if "STOP_FLAG" not in str(e):
+            add_response_message(f" Lỗi nuôi nick: {str(e)}")
+        return 0
+
+def nuoi_nick_thong_minh(d, delay_seconds, share_rate=15):
+    """Nuôi nick thông minh dựa trên thời gian delay"""
+    if delay_seconds <= 0:
+        return 0
+    
+    if LIGHT_MODE:
+        time_per_video = 7
+    else:
+        time_per_video = 10
+    
+    max_videos = max(1, delay_seconds // time_per_video)
+    max_videos = min(max_videos, 5)
+    
+    if max_videos > 0:
+        add_response_message(f" Nuôi nick thông minh: {delay_seconds}s -> lướt {max_videos} video")
+        start_time = time.time()
+        nuoi_nick_short(d, num_videos=max_videos, share_rate=share_rate)
+        elapsed = time.time() - start_time
+        
+        remaining = delay_seconds - elapsed
+        if remaining > 0:
+            add_response_message(f" Còn {remaining:.0f}s, đợi thêm...")
+            for remaining_sec in range(int(remaining), 0, -1):
+                if check_stop_safe():
+                    break
+                if remaining_sec % 5 == 0 or remaining_sec <= 3:
+                    update_account_status(account_id, f"⏳ Đợi thêm {remaining_sec}s...")
+                time.sleep(1)
+        
+        return elapsed
+    else:
+        for remaining_sec in range(delay_seconds, 0, -1):
+            if check_stop_safe():
+                break
+            if remaining_sec % 5 == 0 or remaining_sec <= 3:
+                update_account_status(account_id, f" Đợi {remaining_sec}s...")
+            time.sleep(1)
+        return delay_seconds
 
 # ==================== HÀM HỖ TRỢ TIKTOK ====================
 def restart_tiktok(d):
@@ -101,7 +363,6 @@ def check_app_status(d):
         return False
 
 # ==================== HÀM THÊM MESSAGE VÀO DASHBOARD ====================
-# Queue lưu trữ tất cả message response
 response_messages = []
 response_lock = threading.Lock()
 
@@ -109,54 +370,41 @@ def add_response_message(msg):
     """Thêm message response vào queue và cập nhật lên Dashboard"""
     global account_id, logger, response_messages
     
-    # Thêm timestamp
     timestamp = get_vn_time().strftime('%H:%M:%S')
     full_msg = f"[{timestamp}] {msg}"
     
-    # Log vào file
     if logger:
         logger.info(msg)
     
-    # Lưu vào queue
     with response_lock:
         response_messages.append(full_msg)
-        # Giữ tối đa 50 message gần nhất
         if len(response_messages) > 50:
             response_messages.pop(0)
     
-    # Cập nhật lên Dashboard nếu có account_id
     if account_id:
         with dashboard_lock:
             if account_id in accounts_data:
-                # Lấy message hiện tại (nếu có nhiều, lấy message mới nhất)
                 current_status = accounts_data[account_id].get("status", "")
                 new_status = msg[:80] if len(msg) > 80 else msg
                 accounts_data[account_id]["status"] = new_status
                 accounts_data[account_id]["last_message"] = msg
                 accounts_data[account_id]["message_time"] = timestamp
     else:
-        # Nếu chưa có account_id, lưu vào biến tạm để sau này hiển thị
         with response_lock:
             if 'temp_messages' not in globals():
                 global temp_messages
                 temp_messages = []
             temp_messages.append(full_msg)
 
-# Hàm lấy tất cả message response (để hiển thị trong Dashboard)
 def get_all_response_messages():
     with response_lock:
         return response_messages.copy()
 
 # ==================== HÀM LẤY MESSAGE CHUẨN TỪ RESPONSE ====================
 def extract_message_from_response(response_json):
-    """
-    Lấy message chuẩn từ response JSON
-    Trả về message thuần, không có HTTP status code
-    """
     if not isinstance(response_json, dict):
         return str(response_json) if response_json else ""
     
-    # Các key có thể chứa message
     message_keys = ['message', 'msg', 'error', 'error_message', 'error_msg', 'description', 'detail']
     
     for key in message_keys:
@@ -171,14 +419,9 @@ def extract_message_from_response(response_json):
                 if sub_msg:
                     return sub_msg
     
-    # Nếu không có key message, trả về toàn bộ response dạng string
     return json.dumps(response_json, ensure_ascii=False) if response_json else ""
 
 def parse_api_response(response, func_name="api_call"):
-    """
-    Parse API response, trả về dict với đầy đủ status, message, data
-    MESSAGE HIỂN THỊ THUẦN TỪ SERVER
-    """
     result = {
         'success': False,
         'status_code': None,
@@ -196,20 +439,15 @@ def parse_api_response(response, func_name="api_call"):
         try:
             resp_json = response.json()
             result['data'] = resp_json
-            
-            # Lấy message chuẩn
             result['message'] = extract_message_from_response(resp_json)
             
-            # Nếu message rỗng, dùng status code
             if not result['message']:
                 result['message'] = f"HTTP {response.status_code}"
             
-            # Kiểm tra status trong JSON
             json_status = resp_json.get('status')
             if json_status == 200:
                 result['success'] = True
             
-            # Detect limit/checkpoint
             msg_lower = result['message'].lower()
             if any(kw in msg_lower for kw in ['limit', 'giới hạn', 'quá nhiều', 'too many', 'rate limit']):
                 result['is_limit'] = True
@@ -222,19 +460,16 @@ def parse_api_response(response, func_name="api_call"):
     except Exception as e:
         result['message'] = f"Exception: {str(e)}"
     
-    # THÊM MESSAGE VÀO DASHBOARD
     limit_flag = " [LIMIT]" if result['is_limit'] else ""
     cp_flag = " [CHECKPOINT]" if result['is_checkpoint'] else ""
     full_message = f"{result['message']}{limit_flag}{cp_flag}"
     
-    # Thêm vào queue message
     add_response_message(f"[{func_name}] {full_message}")
     
     return result
 
-# ==================== HÀM LẤY USERNAME MỚI CHÍNH XÁC (TỐI ƯU) ====================
+# ==================== HÀM LẤY USERNAME MỚI CHÍNH XÁC ====================
 def click_username_by_dump(d):
-    """Click vào username và lấy tên username chính xác từ TikTok (tối ưu không chờ thừa)"""
     try:
         if not check_app_status(d):
             return None
@@ -270,7 +505,6 @@ def click_username_by_dump(d):
     return None
 
 def get_tiktok_username_v2(d, max_retry=3):
-    """Lấy username TikTok từ thiết bị bằng cách click vào username thật (tối ưu nhanh)"""
     check_stop()
     add_response_message("Đang tự động lấy Username TikTok...")
     
@@ -286,18 +520,17 @@ def get_tiktok_username_v2(d, max_retry=3):
         username = click_username_by_dump(d)
         
         if username and len(username) > 1:
-            add_response_message(f"✅ Đã lấy được Username: {username}")
+            add_response_message(f" Đã lấy được Username: {username}")
             return username
         
         if attempt < max_retry - 1:
             add_response_message(f"Chưa tìm thấy, thử lại sau 1 giây...")
             time.sleep(1)
     
-    add_response_message("❌ Không thể lấy Username sau nhiều lần thử")
+    add_response_message(" Không thể lấy Username sau nhiều lần thử")
     return None
 
 # ======================================================================
-
 DATA_DIR = "data"
 os.makedirs(DATA_DIR, exist_ok=True)
 
@@ -328,7 +561,9 @@ delay_config = {
     'favorite': [5, 5],
     'job': [5, 5],
     'delay_done': 9,
-    'loc_follow': 0
+    'loc_follow': 0,
+    'nuoi_nick': 2,
+    'share_rate': 15
 }
 
 logger = None
@@ -383,6 +618,52 @@ def find_like_btn(nodes):
     
     candidates.sort(key=lambda x: x[1], reverse=True)
     return candidates[0][0]
+
+def dump_ui_nodes(device_obj):
+    """Phiên bản tối ưu với cache"""
+    global _ui_dump_cache
+    
+    now = time.time()
+    
+    if (_ui_dump_cache["nodes"] and 
+        (now - _ui_dump_cache["timestamp"]) < _UI_DUMP_CACHE_TTL):
+        return _ui_dump_cache["nodes"]
+    
+    try:
+        xml_content = device_obj.dump_hierarchy()
+        
+        nodes = []
+        pattern = re.compile(r'<node\s+([^>]+)>')
+        attr_pattern = re.compile(r'([\w\-]+)="([^"]*)"')
+        
+        for match in pattern.finditer(xml_content):
+            attrs = dict(attr_pattern.findall(match.group(1)))
+            nodes.append(attrs)
+        
+        _ui_dump_cache["xml"] = xml_content
+        _ui_dump_cache["timestamp"] = now
+        _ui_dump_cache["nodes"] = nodes
+        
+        return nodes
+    except Exception as e:
+        add_response_message(f"Lỗi dump UI nodes: {str(e)}")
+        return []
+
+def click_node_by_bounds(device_obj, node):
+    bounds = node.get("bounds")
+    if not bounds:
+        return False
+    
+    pts = list(map(int, re.findall(r'\d+', bounds)))
+    if len(pts) >= 4:
+        x = (pts[0] + pts[2]) // 2
+        y = (pts[1] + pts[3]) // 2
+        
+        add_response_message(f"Click tại {x},{y}")
+        device_obj.click(x, y)
+        return True
+    
+    return False
 
 def do_like(d, max_retry=10):
     if not d:
@@ -726,34 +1007,25 @@ def complete_and_check_response(ads_id, account_id_val, job_type, link):
 
 def get_job_price(job_data):
     try:
-        price_fields = ['reward', 'price', 'money', 'coin', 'amount', 'value', 'point']
-        for field in price_fields:
-            if field in job_data:
-                price = job_data[field]
-                if isinstance(price, dict):
-                    for subfield in ["amount", "value", "money", "coin"]:
-                        if subfield in price:
-                            price = price[subfield]
+        for key in ['price_after_cost', 'price_per_after_cost', 'amount', 'reward', 'price', 'money', 'coin', 'value', 'point']:
+            if key in job_data and job_data[key]:
+                val = job_data[key]
+                if isinstance(val, dict):
+                    for subkey in ['amount', 'value', 'money', 'coin']:
+                        if subkey in val and val[subkey]:
+                            val = val[subkey]
                             break
-                if isinstance(price, str):
-                    price = re.sub(r'[^\d.]', '', price)
-                    if price:
-                        price = float(price) if '.' in price else int(price)
+                if isinstance(val, str):
+                    val = re.sub(r'[^\d.]', '', val)
+                    if val:
+                        val = float(val) if '.' in val else int(val)
                     else:
                         continue
-                if isinstance(price, (int, float)) and price > 0:
-                    return price
-
-        default_prices = {
-            'like': 5,
-            'follow': 10,
-            'comment': 8,
-            'favorite': 6
-        }
-        return default_prices.get(job_data.get('type', ''), 5)
-    except Exception as e:
-        add_response_message(f"Lỗi lấy tiền nhiệm vụ: {str(e)}")
-        return 5
+                if isinstance(val, (int, float)) and val > 0:
+                    return int(val)
+        return 0
+    except Exception:
+        return 0
 
 def process_tiktok_job(job_data):
     try:
@@ -765,7 +1037,7 @@ def process_tiktok_job(job_data):
 
         if action_type == "follow":
             if job_price < MIN_FOLLOW_PRICE:
-                return False, f"giá thấp hơn {MIN_FOLLOW_PRICE}", ads_id, job_price
+                return False, f"Job Follow giá thấp ({job_price}đ < {MIN_FOLLOW_PRICE}đ) -> Bỏ qua", ads_id, job_price
 
         if action_type not in ["like", "follow", "comment", "favorite"]:
             return False, "loại không hỗ trợ", None, 0
@@ -830,7 +1102,7 @@ def banner():
       \033[38;2;150;230;255m  ░       ░░░ ░ ░ ░  ░  ░       ░      ░ ░ ░ ▒  ░ ░ ░ ▒    ░ ░
       \033[38;2;120;255;230m            ░           ░                  ░ ░      ░ ░      ░  ░
 \033[0m
-\033[38;2;255;200;140m[\033[38;2;245;245;245m</>\033[38;2;255;200;140m] \033[38;2;200;160;255mADMIN:\033[38;2;255;235;180m NHƯ ANH ĐÃ THẤY EM   \033[38;2;255;220;160mPhiên Bản: \033[38;2;120;255;220mv3.5
+\033[38;2;255;200;140m[\033[38;2;245;245;245m</>\033[38;2;255;200;140m] \033[38;2;200;160;255mADMIN:\033[38;2;255;235;180m NHƯ ANH ĐÃ THẤY EM   \033[38;2;255;220;160mPhiên Bản: \033[38;2;120;255;220mv3.9
 \033[38;2;255;200;140m[\033[38;2;245;245;245m</>\033[38;2;255;200;140m] \033[38;2;200;160;255mNhóm Telegram: \033[38;2;120;255;220mhttps://t.me/se_meo_bao_an
 \033[38;2;190;235;210m───────────────────────────────────────────────────────────────────────\033[0m
 """
@@ -904,6 +1176,8 @@ def setup_delay_config():
     delay_comment = [delay_config['comment'][0], delay_config['comment'][1]]
     delay_job = [delay_config['job'][0], delay_config['job'][1]]
     delay_fav = [delay_config['favorite'][0], delay_config['favorite'][1]]
+    nuoi_nick = delay_config.get('nuoi_nick', 2)
+    share_rate = delay_config.get('share_rate', 15)
 
     loc_follow = delay_config['loc_follow']
     delay_done = delay_config['delay_done']
@@ -935,6 +1209,18 @@ def setup_delay_config():
         table.add_row(*row("Delay Comment", delay_comment, "#00b0ff", "#80d8ff", "#40c4ff"))
         table.add_row(*row("Delay Get Jobs", delay_job, "#ff9100", "#ffd180", "#ffab40"))
         table.add_row(*row("Delay Favorite", delay_fav, "#a78bfa", "#c4b5fd", "#b388ff"))
+
+        table.add_row(
+            "[#9b59b6]Số video nuôi nick[/]",
+            f"[bold #ffffff]{nuoi_nick}[/]",
+            "[#00ffff]video[/]"
+        )
+        
+        table.add_row(
+            "[#ff69b4]Tỷ lệ Copy Link[/]",
+            f"[bold #ffffff]{share_rate}[/]",
+            "[#00ffff]%[/]"
+        )
 
         table.add_row(
             "[#ff9ecb]Lọc Follow[/]",
@@ -1001,6 +1287,8 @@ def setup_delay_config():
             input_number("Delay Favorite Max: ", delay_fav[1])
         ]
 
+        nuoi_nick = input_number("Số video nuôi nick: ", nuoi_nick)
+        share_rate = input_number("Tỷ lệ Copy Link (0-100%): ", share_rate)
         loc_follow = input_number("Lọc Follow (0 = OFF): ", loc_follow)
         delay_done = input_number("Delay Hoàn Thành: ", delay_done)
 
@@ -1013,6 +1301,8 @@ def setup_delay_config():
     delay_config['comment'] = delay_comment
     delay_config['job'] = delay_job
     delay_config['favorite'] = delay_fav
+    delay_config['nuoi_nick'] = nuoi_nick
+    delay_config['share_rate'] = share_rate
     delay_config['loc_follow'] = loc_follow
     delay_config['delay_done'] = delay_done
     
@@ -1094,7 +1384,7 @@ def menu_jobs():
     selected_jobs = [JOBS[i]["id"] for i in range(len(JOBS)) if selections[i] == 'y']
     
     if selected_jobs:
-        console.print(f"\n[#ffffff]📌 Nhiệm vụ đã chọn:[/] [bold #00ffff]{', '.join(job['name'] for job in JOBS if job['id'] in selected_jobs)}[/]")
+        console.print(f"\n[#ffffff] Nhiệm vụ đã chọn:[/] [bold #00ffff]{', '.join(job['name'] for job in JOBS if job['id'] in selected_jobs)}[/]")
         console.print(f"[#00ff9c]➤ Sẽ thực hiện {len(selected_jobs)} nhiệm vụ[/]\n")
     else:
         console.print("\n[#ff4d6d]⚠ Không có nhiệm vụ nào được chọn! Tool sẽ thoát.[/]")
@@ -1194,6 +1484,8 @@ def get_status_color(status):
         return "pink1"
     elif "hoàn thành" in status_lower or "thành công" in status_lower:
         return "green"
+    elif "nuôi nick" in status_lower or "lướt" in status_lower:
+        return "#9b59b6"
     elif "thất bại" in status_lower or "bỏ qua" in status_lower or "skip" in status_lower:
         return "red"
     elif "tìm nhiệm vụ" in status_lower:
@@ -1293,7 +1585,7 @@ def make_layout():
     layout["title"].update(
         Align.center(
             Panel(
-                "[bold cyan]TOOL GOLIKE TIKTOK BOXPHONE - BY: PHONG Tus[/bold cyan]",
+                "[bold cyan]TOOL GOLIKE TIKTOK BOXPHONE - BY: PHONG Tus | VER 3.9[/bold cyan]",
                 style="bright_yellow",
                 box=box.DOUBLE
             )
@@ -1307,9 +1599,11 @@ def make_layout():
     return layout
 
 def run_dashboard():
+    refresh_rate = 1.0 if LIGHT_MODE else 2.0
+    
     with Live(
         make_layout(),
-        refresh_per_second=2,
+        refresh_per_second=refresh_rate,
         screen=True,
         auto_refresh=True
     ) as live:
@@ -1589,7 +1883,7 @@ def display_auth_menu():
             save_authorization(new_auth)
             return display_auth_menu()
         else:
-            console.print("[red]✖ Authorization không được để trống![/]")
+            console.print("[red] Authorization không được để trống![/]")
             sys.exit(1)
     
     acc_lines = []
@@ -1802,6 +2096,9 @@ def connect_device(serial):
             device.info
             console.print(f"[green]✓ Kết nối thành công![/]")
             add_response_message(f"Kết nối thành công tới thiết bị {serial}")
+            
+            detect_device_performance(device)
+            
             check_tiktok_installed()
             return True
         except Exception as e:
@@ -1815,7 +2112,7 @@ def check_tiktok_installed():
     try:
         packages = device.app_list()
         if TIKTOK_PACKAGE not in packages:
-            console.print("[yellow]⚠ Cảnh báo: TikTok chưa được cài đặt![/]")
+            console.print("[yellow] Cảnh báo: TikTok chưa được cài đặt![/]")
             add_response_message("Cảnh báo: TikTok chưa được cài đặt trên thiết bị")
             return False
         return True
@@ -1833,9 +2130,7 @@ def force_stop_tiktok():
     pkg = TIKTOK_PACKAGE
     device.shell(f"am start -a android.settings.APPLICATION_DETAILS_SETTINGS -d package:{pkg}")
     
-    # Chờ UI load nhưng nếu xuất hiện sớm thì click ngay
     if device(textMatches="(?i)(Buộc dừng|Buộc đóng|Force stop)").wait(timeout=10):
-        # Khi đã thấy nút, click ngay lập tức
         for attempt in range(3):
             check_stop()
             btn_stop = device(resourceIdMatches=".*(?i)(force_stop|stop_button).*")
@@ -1843,12 +2138,10 @@ def force_stop_tiktok():
                 btn_stop = device(textMatches="(?i)(Buộc dừng|Buộc đóng|Force stop)")
             
             if btn_stop.exists:
-                # Chỉ kiểm tra enabled, không chờ UI ổn định
                 if btn_stop.info.get('enabled', False):
                     add_response_message(f"[{device_serial}] Đang bấm Buộc dừng (Lần {attempt+1})...")
                     btn_stop.click()
                     
-                    # Chờ popup OK xuất hiện
                     btn_ok = device(resourceId="android:id/button1")
                     if not btn_ok.exists:
                         btn_ok = device(textMatches="(?i)(ok|đồng ý|xác nhận)")
@@ -1860,7 +2153,6 @@ def force_stop_tiktok():
                     else:
                         add_response_message(f"[{device_serial}] Chưa thấy nút OK, thử lại...")
                 else:
-                    # Nút bị mờ → app đã dừng
                     add_response_message(f"[{device_serial}] App đã dừng từ trước (Nút bị mờ)")
                     return
             time.sleep(0.5)
@@ -1878,7 +2170,6 @@ def start_tiktok_and_wait():
     
     device.app_start(TIKTOK_PACKAGE)
     
-    # Chờ UI load với timeout ngắn hơn
     if device(resourceIdMatches=".*tab_layout.*").wait(timeout=5):
         add_response_message(f"[{device_serial}] TikTok đã sẵn sàng")
         return True
@@ -1914,45 +2205,15 @@ def find_first_selector(d, candidates, timeout_per=1):
             continue
     return None, None
 
-def dump_ui_nodes(device_obj):
-    try:
-        xml_content = device_obj.dump_hierarchy()
-        
-        nodes = []
-        for match in re.finditer(r'<node (.*?)>', xml_content):
-            attrs = dict(re.findall(r'([\w\-]+)="([^"]*)"', match.group(1)))
-            nodes.append(attrs)
-        
-        return nodes
-    except Exception as e:
-        add_response_message(f"Lỗi dump UI nodes: {str(e)}")
-        return []
-
-def click_node_by_bounds(device_obj, node):
-    bounds = node.get("bounds")
-    if not bounds:
-        return False
-    
-    pts = list(map(int, re.findall(r'\d+', bounds)))
-    if len(pts) >= 4:
-        x = (pts[0] + pts[2]) // 2
-        y = (pts[1] + pts[3]) // 2
-        
-        add_response_message(f"Click tại {x},{y}")
-        device_obj.click(x, y)
-        return True
-    
-    return False
-
 session = requests.Session()
 headers = {}
 
-# ==================== MAIN CODE ====================
+# ==================== MAIN CODE V3.9 ====================
 if __name__ == "__main__":
     clear_stop_flag()
     
     if not init_files():
-        console.print("[red]✖ Không thể khởi tạo files chung! Thoát tool.[/]")
+        console.print("[red] Không thể khởi tạo files chung! Thoát tool.[/]")
         sys.exit(1)
 
     banner()
@@ -2125,9 +2386,16 @@ if __name__ == "__main__":
         
         start_tiktok_and_wait()
         
+        num_videos_khoi_dong = delay_config.get('nuoi_nick', 2)
+        share_rate = delay_config.get('share_rate', 15)
+        if num_videos_khoi_dong > 0:
+            update_account_status(account_id, f" Đang nuôi nick khởi động ({num_videos_khoi_dong} video, tỷ lệ copy link {share_rate}%)...")
+            nuoi_nick_short(device, num_videos=num_videos_khoi_dong, share_rate=share_rate)
+            update_account_status(account_id, " Nuôi nick xong, bắt đầu tìm job...")
+        
         while True:
             check_stop()
-            update_account_status(account_id, "Đang tìm nhiệm vụ...")
+            update_account_status(account_id, " Đang tìm nhiệm vụ...")
             
             time.sleep(get_random_delay_job('job'))
 
@@ -2145,10 +2413,17 @@ if __name__ == "__main__":
 
             if nhanjob.get("status") == 200:
                 data = nhanjob.get("data")
+                
                 if not data or not data.get("link"):
-                    msg = nhanjob.get("message", "Không có nhiệm vụ")
+                    msg = nhanjob.get("message", " Không có nhiệm vụ")
                     update_account_status(account_id, msg)
-                    time.sleep(1)
+                    
+                    num_videos_het_job = max(2, delay_config.get('nuoi_nick', 2) * 2)
+                    share_rate_het_job = random.randint(30, 50)
+                    update_account_status(account_id, f" Hết job - Nuôi nick tăng trust ({num_videos_het_job} video, copy link {share_rate_het_job}%)...")
+                    nuoi_nick_short(device, num_videos=num_videos_het_job, share_rate=share_rate_het_job, is_high_trust_mode=True)
+                    
+                    time.sleep(2)
                     continue
 
                 current_link = data.get("link")
@@ -2161,7 +2436,7 @@ if __name__ == "__main__":
                             msg = result.get("message", "")
                             update_account_status(account_id, msg)
                         else:
-                            update_account_status(account_id, f"Bỏ qua job đã làm: {result.get('message', 'OK')}")
+                            update_account_status(account_id, f" Bỏ qua job đã làm: {result.get('message', 'OK')}")
                     except Exception as e:
                         add_response_message(f"Lỗi khi báo lỗi: {str(e)}")
                     continue
@@ -2173,7 +2448,7 @@ if __name__ == "__main__":
                             msg = result.get("message", "")
                             update_account_status(account_id, msg)
                         else:
-                            update_account_status(account_id, f"Bỏ qua job loại {data['type']}")
+                            update_account_status(account_id, f" Bỏ qua job loại {data['type']}")
                         time.sleep(1)
                         continue
                     except Exception as e:
@@ -2181,35 +2456,44 @@ if __name__ == "__main__":
                         continue
 
                 status_map = {
-                    "follow": "Đang follow...",
-                    "like": "Đang like...",
-                    "comment": "Đang comment...",
-                    "favorite": "Đang favorite..."
+                    "follow": " Đang follow...",
+                    "like": " Đang like...",
+                    "comment": " Đang comment...",
+                    "favorite": " Đang favorite..."
                 }
-                update_account_status(account_id, status_map.get(data["type"], f"Đang xử lý {data['type']}..."))
+                update_account_status(account_id, status_map.get(data["type"], f"⚙️ Đang xử lý {data['type']}..."))
 
                 success, reason, job_ads_id, job_price = process_tiktok_job(data)
 
                 if success:
                     job_count += 1
                     update_account_stats(account_id, data["type"], job_price, success=True)
-                    update_account_status(account_id, f"Hoàn thành - +{job_price}đ - {reason[:80] if len(reason) > 80 else reason}")
+                    
+                    delay_time = delay_config['delay_done']
+                    share_rate_normal = delay_config.get('share_rate', 15)
+                    
+                    if delay_time > 0:
+                        update_account_status(account_id, f" Hoàn thành job +{job_price}đ - Nuôi nick {delay_time}s...")
+                        nuoi_nick_thong_minh(device, delay_time, share_rate_normal)
+                    
+                    update_account_status(account_id, f" Hoàn thành - +{job_price}đ")
 
                     if FORCE_STOP_AFTER > 0 and job_count >= FORCE_STOP_AFTER:
                         add_response_message(f"[{device_serial}] Đã hoàn thành {job_count} job -> Force Stop")
-                        update_account_status(account_id, f"Đã làm {job_count} job -> Force Stop...")
+                        update_account_status(account_id, f" Đã làm {job_count} job -> Force Stop...")
                         force_stop_tiktok()
                         job_count = 0
                         start_tiktok_and_wait()
-                    
-                    delay = delay_config['delay_done']
-                    for remaining_time in range(delay, 0, -1):
-                        check_stop()
-                        update_account_status(account_id, f"Đợi {remaining_time}s...")
-                        time.sleep(1)
                 else:
                     update_account_stats(account_id, data["type"], 0, success=False)
-                    update_account_status(account_id, reason)
+                    
+                    num_videos_loi = max(1, delay_config.get('nuoi_nick', 2) // 2)
+                    share_rate_loi = delay_config.get('share_rate', 15)
+                    if num_videos_loi > 0:
+                        update_account_status(account_id, f" Job lỗi - Nuôi nhẹ ({num_videos_loi} video)...")
+                        nuoi_nick_short(device, num_videos=num_videos_loi, share_rate=share_rate_loi)
+                    
+                    update_account_status(account_id, f" {reason}")
 
                     try:
                         result = baoloi(data["id"], data["object_id"], account_id, data["type"])
@@ -2221,11 +2505,17 @@ if __name__ == "__main__":
                     time.sleep(1)
             else:
                 error_msg = nhanjob.get("message", "")
-                update_account_status(account_id, error_msg)
-                time.sleep(10)
+                
+                num_videos = delay_config.get('nuoi_nick', 2) * 2
+                share_rate_cao = random.randint(30, 50)
+                update_account_status(account_id, f" Lỗi API - Nuôi gắt ({num_videos} video, copy link {share_rate_cao}%)...")
+                nuoi_nick_short(device, num_videos=num_videos, share_rate=share_rate_cao, is_high_trust_mode=True)
+                
+                update_account_status(account_id, f" {error_msg}")
+                time.sleep(5)
                 
     except KeyboardInterrupt:
-        console.print("\n[yellow]⚠ Đã dừng tool bởi người dùng![/]")
+        console.print("\n[yellow] Đã dừng tool bởi người dùng![/]")
         if logger:
             logger.info("Tool đã dừng bởi người dùng")
     except Exception as e:
