@@ -1,0 +1,852 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
+    <title>KeyMarket Pro - Bán Key Tự Động</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+        }
+
+        body {
+            background: #f5f7fb;
+            min-height: 100vh;
+        }
+
+        /* Header & Navigation */
+        .top-bar {
+            background: linear-gradient(135deg, #1e2b3c 0%, #0f1724 100%);
+            color: white;
+            padding: 12px 24px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 12px;
+            border-bottom: 2px solid #ff9800;
+        }
+
+        .logo h1 {
+            font-size: 1.5rem;
+            background: linear-gradient(135deg, #ff9800, #ff5722);
+            background-clip: text;
+            -webkit-background-clip: text;
+            color: transparent;
+            font-weight: 800;
+        }
+
+        .logo p {
+            font-size: 0.7rem;
+            color: #90a4ae;
+        }
+
+        .user-info {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            background: rgba(255,255,255,0.1);
+            padding: 6px 18px;
+            border-radius: 40px;
+        }
+
+        .user-name {
+            font-weight: 500;
+        }
+
+        .role-badge {
+            background: #ff9800;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 0.7rem;
+            font-weight: bold;
+        }
+
+        .role-badge.admin {
+            background: #f44336;
+        }
+
+        button {
+            background: #ff9800;
+            border: none;
+            padding: 8px 20px;
+            border-radius: 30px;
+            color: #1e2b3c;
+            font-weight: bold;
+            cursor: pointer;
+            transition: 0.2s;
+        }
+
+        button.outline {
+            background: transparent;
+            border: 1px solid #ff9800;
+            color: #ff9800;
+        }
+
+        button:hover {
+            transform: scale(1.02);
+            background: #ff5722;
+            color: white;
+        }
+
+        /* Main Container */
+        .container {
+            max-width: 1300px;
+            margin: 0 auto;
+            padding: 24px;
+        }
+
+        /* Warning & Notice */
+        .warning-box {
+            background: #fff3e0;
+            border-left: 5px solid #ff9800;
+            padding: 15px 20px;
+            margin-bottom: 24px;
+            border-radius: 12px;
+            font-size: 0.85rem;
+            color: #5d4037;
+        }
+
+        .notice-box {
+            background: #e3f2fd;
+            border-left: 5px solid #2196f3;
+            padding: 12px 20px;
+            margin-bottom: 20px;
+            border-radius: 10px;
+            display: flex;
+            justify-content: space-between;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+
+        /* Product Grid */
+        .product-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+            gap: 24px;
+            margin: 30px 0;
+        }
+
+        .product-card {
+            background: white;
+            border-radius: 20px;
+            overflow: hidden;
+            box-shadow: 0 5px 20px rgba(0,0,0,0.08);
+            transition: 0.3s;
+            border: 1px solid #e0e0e0;
+        }
+
+        .product-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 15px 35px rgba(0,0,0,0.12);
+        }
+
+        .product-header {
+            background: linear-gradient(135deg, #1e2b3c, #0f1724);
+            padding: 20px;
+            text-align: center;
+            color: white;
+        }
+
+        .product-header h3 {
+            font-size: 1.3rem;
+            margin-bottom: 5px;
+        }
+
+        .product-price {
+            font-size: 1.8rem;
+            font-weight: bold;
+            color: #ff9800;
+            margin: 10px 0;
+        }
+
+        .product-body {
+            padding: 20px;
+        }
+
+        .product-body ul {
+            list-style: none;
+            padding: 0;
+        }
+
+        .product-body li {
+            padding: 8px 0;
+            border-bottom: 1px solid #eee;
+            font-size: 0.85rem;
+        }
+
+        .buy-btn {
+            width: 100%;
+            margin-top: 15px;
+            background: #ff9800;
+            color: #1e2b3c;
+            font-weight: bold;
+            padding: 12px;
+        }
+
+        /* Auth Modal */
+        .modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.7);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 2000;
+        }
+
+        .auth-modal {
+            background: white;
+            border-radius: 28px;
+            max-width: 450px;
+            width: 90%;
+            padding: 30px;
+            position: relative;
+        }
+
+        .auth-tabs {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 25px;
+            border-bottom: 2px solid #eee;
+        }
+
+        .auth-tab {
+            padding: 10px 20px;
+            cursor: pointer;
+            font-weight: 600;
+            color: #666;
+        }
+
+        .auth-tab.active {
+            color: #ff9800;
+            border-bottom: 2px solid #ff9800;
+            margin-bottom: -2px;
+        }
+
+        .input-field {
+            width: 100%;
+            padding: 12px 16px;
+            margin: 10px 0;
+            border: 1px solid #ddd;
+            border-radius: 12px;
+            font-size: 0.9rem;
+        }
+
+        /* Dashboard */
+        .dashboard-stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+
+        .stat-card {
+            background: white;
+            padding: 20px;
+            border-radius: 20px;
+            text-align: center;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+        }
+
+        .stat-number {
+            font-size: 2rem;
+            font-weight: bold;
+            color: #ff9800;
+        }
+
+        .key-list {
+            background: white;
+            border-radius: 20px;
+            padding: 20px;
+            margin-top: 20px;
+        }
+
+        .key-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px;
+            border-bottom: 1px solid #eee;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+
+        .key-code {
+            font-family: monospace;
+            font-weight: bold;
+            color: #1e2b3c;
+        }
+
+        .admin-actions {
+            display: flex;
+            gap: 12px;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+        }
+
+        .toast {
+            position: fixed;
+            bottom: 30px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: #1e2b3c;
+            color: white;
+            padding: 12px 24px;
+            border-radius: 50px;
+            z-index: 3000;
+            animation: fadeInUp 0.3s ease;
+        }
+
+        @keyframes fadeInUp {
+            from { opacity: 0; bottom: 0; }
+            to { opacity: 1; bottom: 30px; }
+        }
+
+        footer {
+            text-align: center;
+            padding: 24px;
+            color: #6c757d;
+            font-size: 0.8rem;
+            border-top: 1px solid #e0e0e0;
+            margin-top: 40px;
+        }
+
+        .support-box {
+            background: #e8f5e9;
+            padding: 15px;
+            border-radius: 15px;
+            margin-top: 20px;
+            text-align: center;
+        }
+
+        @media (max-width: 768px) {
+            .container {
+                padding: 16px;
+            }
+            .product-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="top-bar">
+        <div class="logo">
+            <h1>🔑 KeyMarket Pro</h1>
+            <p>Chuyên cung cấp key chất lượng cao</p>
+        </div>
+        <div class="user-info" id="userInfoArea">
+            <span class="user-name" id="userNameDisplay">Chưa đăng nhập</span>
+            <button id="authBtn" class="outline">Đăng nhập</button>
+        </div>
+    </div>
+
+    <div class="container" id="mainContent">
+        <!-- Nội dung sẽ được render bằng JS -->
+    </div>
+
+    <footer>
+        <p>© 2025 KeyMarket - Hệ thống bán key tự động | Bảo hành 24/7 | Zalo: 0978495902</p>
+        <p style="font-size: 0.7rem; margin-top: 8px;">Lưu ý: Key sẽ tự động bị xóa sau 7 ngày nếu không sử dụng</p>
+    </footer>
+
+    <script>
+        // ==================== STORAGE ====================
+        const STORAGE_USERS = "keymarket_users";
+        const STORAGE_KEYS = "keymarket_keys";
+        const STORAGE_SESSION = "keymarket_session";
+        const MASTER_API_KEY = "KM_API_2025";
+
+        // ==================== KHỞI TẠO DỮ LIỆU ====================
+        function initData() {
+            if (!localStorage.getItem(STORAGE_USERS)) {
+                const defaultUsers = [
+                    { id: "admin_1", username: "admin", password: "admin123", role: "admin", fullname: "Administrator", email: "admin@keymarket.com", createdAt: new Date().toISOString() }
+                ];
+                localStorage.setItem(STORAGE_USERS, JSON.stringify(defaultUsers));
+            }
+            if (!localStorage.getItem(STORAGE_KEYS)) {
+                const defaultKeys = [
+                    { id: "key_1", code: "VIP-9F8D-3A2C-1B7E", status: "active", createdBy: "admin", createdAt: new Date().toISOString(), soldTo: null, price: 199000, type: "VIP 1 Tháng" },
+                    { id: "key_2", code: "PRO-X7K9-4M2N-6V3C", status: "active", createdBy: "admin", createdAt: new Date().toISOString(), soldTo: null, price: 299000, type: "PRO 3 Tháng" },
+                    { id: "key_3", code: "ULTRA-5H6J-8K2L-0Q9W", status: "active", createdBy: "admin", createdAt: new Date().toISOString(), soldTo: null, price: 499000, type: "Ultimate 1 Năm" }
+                ];
+                localStorage.setItem(STORAGE_KEYS, JSON.stringify(defaultKeys));
+            }
+        }
+        initData();
+
+        // ==================== HELPERS ====================
+        function getUsers() { return JSON.parse(localStorage.getItem(STORAGE_USERS)) || []; }
+        function saveUsers(users) { localStorage.setItem(STORAGE_USERS, JSON.stringify(users)); }
+        function getKeys() { return JSON.parse(localStorage.getItem(STORAGE_KEYS)) || []; }
+        function saveKeys(keys) { localStorage.setItem(STORAGE_KEYS, JSON.stringify(keys)); }
+
+        // ==================== AUTH ====================
+        function getSession() {
+            const sess = localStorage.getItem(STORAGE_SESSION);
+            if (!sess) return null;
+            try {
+                const data = JSON.parse(sess);
+                if (data.expiry && Date.now() > data.expiry) {
+                    localStorage.removeItem(STORAGE_SESSION);
+                    return null;
+                }
+                return data.user;
+            } catch(e) { return null; }
+        }
+
+        function setSession(user) {
+            const { password, ...safeUser } = user;
+            localStorage.setItem(STORAGE_SESSION, JSON.stringify({ user: safeUser, expiry: Date.now() + 8 * 3600000 }));
+        }
+
+        function logout() {
+            localStorage.removeItem(STORAGE_SESSION);
+            renderApp();
+            showToast("Đã đăng xuất!");
+        }
+
+        function handleLogin(username, password) {
+            const users = getUsers();
+            const user = users.find(u => u.username === username && u.password === password);
+            if (user) {
+                setSession(user);
+                renderApp();
+                showToast(`Chào mừng ${user.fullname}!`);
+                return true;
+            }
+            showToast("Sai tài khoản hoặc mật khẩu!", true);
+            return false;
+        }
+
+        function handleRegister(username, password, fullname) {
+            const users = getUsers();
+            if (users.find(u => u.username === username)) {
+                showToast("Tên đăng nhập đã tồn tại!", true);
+                return false;
+            }
+            if (username.length < 3 || password.length < 3) {
+                showToast("Tên đăng nhập/mật khẩu tối thiểu 3 ký tự!", true);
+                return false;
+            }
+            const newUser = {
+                id: "u_" + Date.now(),
+                username: username,
+                password: password,
+                role: "user",
+                fullname: fullname || username,
+                email: `${username}@user.com`,
+                createdAt: new Date().toISOString()
+            };
+            users.push(newUser);
+            saveUsers(users);
+            setSession(newUser);
+            renderApp();
+            showToast("Đăng ký thành công!");
+            return true;
+        }
+
+        // ==================== QUẢN LÝ KEY ====================
+        function addNewKey(code, price, type) {
+            const sessionUser = getSession();
+            if (!sessionUser || sessionUser.role !== 'admin') {
+                showToast("Chỉ admin mới được tạo key!", true);
+                return false;
+            }
+            if (!code || code.trim() === "") {
+                showToast("Vui lòng nhập mã key!", true);
+                return false;
+            }
+            const keys = getKeys();
+            if (keys.find(k => k.code === code.trim())) {
+                showToast("Mã key đã tồn tại!", true);
+                return false;
+            }
+            const newKey = {
+                id: "key_" + Date.now(),
+                code: code.trim(),
+                status: "active",
+                createdBy: sessionUser.username,
+                createdAt: new Date().toISOString(),
+                soldTo: null,
+                price: parseInt(price) || 0,
+                type: type || "Key thường",
+                usedCount: 0
+            };
+            keys.push(newKey);
+            saveKeys(keys);
+            showToast(`Đã thêm key: ${code}`);
+            renderApp();
+            return true;
+        }
+
+        function deleteKey(keyId) {
+            const sessionUser = getSession();
+            if (!sessionUser || sessionUser.role !== 'admin') {
+                showToast("Không có quyền!", true);
+                return;
+            }
+            let keys = getKeys();
+            keys = keys.filter(k => k.id !== keyId);
+            saveKeys(keys);
+            showToast("Đã xóa key!");
+            renderApp();
+        }
+
+        function purchaseKey(keyId) {
+            const sessionUser = getSession();
+            if (!sessionUser) {
+                showToast("Vui lòng đăng nhập để mua key!", true);
+                return;
+            }
+            if (sessionUser.role === 'admin') {
+                showToast("Admin vui lòng tạo key mới!", true);
+                return;
+            }
+            const keys = getKeys();
+            const keyIndex = keys.findIndex(k => k.id === keyId && k.status === 'active' && !k.soldTo);
+            if (keyIndex === -1) {
+                showToast("Key không khả dụng hoặc đã bán!", true);
+                return;
+            }
+            const key = keys[keyIndex];
+            key.status = "sold";
+            key.soldTo = sessionUser.username;
+            key.soldAt = new Date().toISOString();
+            keys[keyIndex] = key;
+            saveKeys(keys);
+            showToast(`Mua thành công! Key: ${key.code}`);
+            renderApp();
+        }
+
+        // ==================== API HANDLER ====================
+        function handleApiRequest() {
+            const urlParams = new URLSearchParams(window.location.search);
+            const action = urlParams.get('action');
+            const apiKey = urlParams.get('api_key');
+            
+            if (!action) return false;
+            
+            if (apiKey !== MASTER_API_KEY) {
+                sendJsonResponse({ success: false, error: "Invalid API Key", api_key: MASTER_API_KEY });
+                return true;
+            }
+            
+            const keys = getKeys();
+            let response = {};
+            
+            switch(action) {
+                case 'get-key':
+                    const available = keys.find(k => k.status === 'active' && !k.soldTo);
+                    response = available ? { success: true, key: available.code, price: available.price, type: available.type } : { success: false, error: "Hết key" };
+                    break;
+                case 'verify':
+                    const code = urlParams.get('key');
+                    const found = keys.find(k => k.code === code);
+                    response = found ? { success: true, valid: !found.soldTo, message: found.soldTo ? "Đã bán" : "Còn hiệu lực" } : { success: false, valid: false };
+                    break;
+                case 'stats':
+                    response = { total: keys.length, available: keys.filter(k => !k.soldTo).length, sold: keys.filter(k => k.soldTo).length };
+                    break;
+                default:
+                    response = { error: "Action không hợp lệ", actions: ["get-key", "verify", "stats"] };
+            }
+            sendJsonResponse(response);
+            return true;
+        }
+
+        function sendJsonResponse(data) {
+            document.body.innerHTML = `<pre style="background:#1e2b3c; color:#ff9800; padding:20px; margin:0; min-height:100vh;">${JSON.stringify(data, null, 2)}</pre>`;
+        }
+
+        // ==================== RENDER UI ====================
+        function renderAuthModal() {
+            const modal = document.createElement('div');
+            modal.className = 'modal-overlay';
+            modal.innerHTML = `
+                <div class="auth-modal">
+                    <div class="auth-tabs">
+                        <div class="auth-tab active" data-tab="login">Đăng nhập</div>
+                        <div class="auth-tab" data-tab="register">Đăng ký</div>
+                    </div>
+                    <div id="loginForm">
+                        <input type="text" id="loginUser" class="input-field" placeholder="Tên đăng nhập">
+                        <input type="password" id="loginPass" class="input-field" placeholder="Mật khẩu">
+                        <button id="submitLogin" style="width:100%; margin-top:10px;">Đăng nhập</button>
+                    </div>
+                    <div id="registerForm" style="display:none;">
+                        <input type="text" id="regUser" class="input-field" placeholder="Tên đăng nhập">
+                        <input type="password" id="regPass" class="input-field" placeholder="Mật khẩu">
+                        <input type="text" id="regFull" class="input-field" placeholder="Họ tên">
+                        <button id="submitRegister" style="width:100%; margin-top:10px;">Đăng ký</button>
+                    </div>
+                    <button id="closeModal" style="margin-top:15px; background:#ccc; color:#333;">Đóng</button>
+                </div>
+            `;
+            document.body.appendChild(modal);
+            
+            const tabs = modal.querySelectorAll('.auth-tab');
+            const loginDiv = modal.querySelector('#loginForm');
+            const registerDiv = modal.querySelector('#registerForm');
+            
+            tabs.forEach(tab => {
+                tab.onclick = () => {
+                    tabs.forEach(t => t.classList.remove('active'));
+                    tab.classList.add('active');
+                    if (tab.innerText.includes('Đăng nhập')) {
+                        loginDiv.style.display = 'block';
+                        registerDiv.style.display = 'none';
+                    } else {
+                        loginDiv.style.display = 'none';
+                        registerDiv.style.display = 'block';
+                    }
+                };
+            });
+            
+            modal.querySelector('#submitLogin').onclick = () => {
+                const user = modal.querySelector('#loginUser').value;
+                const pass = modal.querySelector('#loginPass').value;
+                if (handleLogin(user, pass)) modal.remove();
+            };
+            modal.querySelector('#submitRegister').onclick = () => {
+                const user = modal.querySelector('#regUser').value;
+                const pass = modal.querySelector('#regPass').value;
+                const full = modal.querySelector('#regFull').value;
+                if (handleRegister(user, pass, full)) modal.remove();
+            };
+            modal.querySelector('#closeModal').onclick = () => modal.remove();
+        }
+
+        function renderGuestHome() {
+            const keys = getKeys();
+            const availableKeys = keys.filter(k => !k.soldTo);
+            
+            return `
+                <div class="warning-box">
+                    ⚠️ CẢNH BÁO: Tất cả tài nguyên chỉ phục vụ mục đích kiếm tiền online. Khách hàng tự chịu trách nhiệm khi sử dụng.
+                </div>
+                <div class="notice-box">
+                    <span>📢 Hệ thống sẽ tự động xóa key sau 7 ngày, vui lòng tải về máy!</span>
+                    <span>🔑 API Key cho tool: <strong>${MASTER_API_KEY}</strong></span>
+                </div>
+                
+                <div class="product-grid" id="productGrid">
+                    ${availableKeys.map(key => `
+                        <div class="product-card">
+                            <div class="product-header">
+                                <h3>${key.type || "Key Premium"}</h3>
+                                <div class="product-price">${key.price.toLocaleString()}đ</div>
+                            </div>
+                            <div class="product-body">
+                                <ul>
+                                    <li>✓ Bảo hành 24/7</li>
+                                    <li>✓ Hỗ trợ đổi key lỗi</li>
+                                    <li>✓ Giao hàng tự động</li>
+                                </ul>
+                                <button class="buy-btn" data-id="${key.id}">Mua ngay</button>
+                            </div>
+                        </div>
+                    `).join('')}
+                </div>
+                
+                <div class="support-box">
+                    <strong>📞 HỖ TRỢ NHANH - NHIỆT TÌNH</strong><br>
+                    Zalo: 0978495902 | Telegram: @Sontrinh29<br>
+                    <small>Tham gia nhóm Zalo để giao lưu, chia sẻ kinh nghiệm</small>
+                </div>
+            `;
+        }
+
+        function renderAdminDashboard(user) {
+            const keys = getKeys();
+            const available = keys.filter(k => !k.soldTo).length;
+            const sold = keys.filter(k => k.soldTo).length;
+            const usersList = getUsers();
+            
+            return `
+                <div class="dashboard-stats">
+                    <div class="stat-card"><div class="stat-number">${keys.length}</div><div>Tổng Key</div></div>
+                    <div class="stat-card"><div class="stat-number">${available}</div><div>Key còn bán</div></div>
+                    <div class="stat-card"><div class="stat-number">${sold}</div><div>Key đã bán</div></div>
+                    <div class="stat-card"><div class="stat-number">${usersList.length}</div><div>Người dùng</div></div>
+                </div>
+                
+                <div class="admin-actions">
+                    <button id="createKeyBtn">➕ Thêm Key Mới</button>
+                    <button id="refreshBtn" class="outline">🔄 Làm mới</button>
+                </div>
+                
+                <div class="key-list">
+                    <h3>📦 Danh sách Key</h3>
+                    ${keys.map(key => `
+                        <div class="key-item">
+                            <div>
+                                <span class="key-code">${key.code}</span>
+                                <span style="margin-left:10px; font-size:12px;">💰 ${key.price.toLocaleString()}đ</span>
+                                <span style="margin-left:10px; font-size:12px;">${key.soldTo ? `✅ Đã bán cho ${key.soldTo}` : '🟢 Còn hàng'}</span>
+                            </div>
+                            <button class="delete-key" data-id="${key.id}" style="background:#f44336; padding:5px 15px;">Xóa</button>
+                        </div>
+                    `).join('')}
+                </div>
+                
+                <div class="key-list" style="margin-top:20px;">
+                    <h3>👥 Quản lý người dùng</h3>
+                    ${usersList.map(u => `
+                        <div class="key-item">
+                            <span>${u.username} - ${u.role === 'admin' ? '👑 Admin' : '👤 User'}</span>
+                            ${u.role !== 'admin' ? `<button class="delete-user" data-id="${u.id}" style="background:#f44336; padding:5px 15px;">Xóa</button>` : ''}
+                        </div>
+                    `).join('')}
+                </div>
+            `;
+        }
+
+        function renderUserDashboard(user) {
+            const keys = getKeys();
+            const myKeys = keys.filter(k => k.soldTo === user.username);
+            const available = keys.filter(k => !k.soldTo);
+            
+            return `
+                <div class="dashboard-stats">
+                    <div class="stat-card"><div class="stat-number">${myKeys.length}</div><div>Key đã mua</div></div>
+                    <div class="stat-card"><div class="stat-number">${available.length}</div><div>Key còn lại</div></div>
+                </div>
+                
+                <div class="product-grid" id="productGrid">
+                    ${available.map(key => `
+                        <div class="product-card">
+                            <div class="product-header">
+                                <h3>${key.type || "Key Premium"}</h3>
+                                <div class="product-price">${key.price.toLocaleString()}đ</div>
+                            </div>
+                            <div class="product-body">
+                                <ul>
+                                    <li>✓ Bảo hành 24/7</li>
+                                    <li>✓ Hỗ trợ đổi key lỗi</li>
+                                    <li>✓ Giao hàng tự động</li>
+                                </ul>
+                                <button class="buy-btn" data-id="${key.id}">Mua ngay</button>
+                            </div>
+                        </div>
+                    `).join('')}
+                </div>
+                
+                <div class="key-list">
+                    <h3>📋 Key của tôi</h3>
+                    ${myKeys.length === 0 ? '<div class="empty-msg" style="padding:20px; text-align:center;">Bạn chưa mua key nào</div>' : 
+                        myKeys.map(key => `
+                            <div class="key-item">
+                                <span class="key-code">${key.code}</span>
+                                <span>Mua ngày: ${new Date(key.soldAt).toLocaleDateString()}</span>
+                            </div>
+                        `).join('')
+                    }
+                </div>
+            `;
+        }
+
+        function showCreateKeyModal() {
+            const modal = document.createElement('div');
+            modal.className = 'modal-overlay';
+            modal.innerHTML = `
+                <div class="auth-modal">
+                    <h3 style="margin-bottom:20px;">➕ Thêm Key Mới</h3>
+                    <input type="text" id="newKeyCode" class="input-field" placeholder="Mã key">
+                    <input type="number" id="newKeyPrice" class="input-field" placeholder="Giá bán" value="199000">
+                    <input type="text" id="newKeyType" class="input-field" placeholder="Loại key (VD: VIP 1 Tháng)">
+                    <div style="display:flex; gap:10px; margin-top:15px;">
+                        <button id="confirmAdd">Thêm</button>
+                        <button id="cancelAdd" class="outline">Hủy</button>
+                    </div>
+                </div>
+            `;
+            document.body.appendChild(modal);
+            modal.querySelector('#confirmAdd').onclick = () => {
+                const code = modal.querySelector('#newKeyCode').value.trim();
+                const price = modal.querySelector('#newKeyPrice').value;
+                const type = modal.querySelector('#newKeyType').value;
+                if (code) {
+                    addNewKey(code, price, type);
+                    modal.remove();
+                } else {
+                    showToast("Nhập mã key!", true);
+                }
+            };
+            modal.querySelector('#cancelAdd').onclick = () => modal.remove();
+        }
+
+        function showToast(msg, isError = false) {
+            const toast = document.createElement('div');
+            toast.className = 'toast';
+            toast.style.background = isError ? '#f44336' : '#1e2b3c';
+            toast.textContent = msg;
+            document.body.appendChild(toast);
+            setTimeout(() => toast.remove(), 2500);
+        }
+
+        function renderApp() {
+            if (handleApiRequest()) return;
+            
+            const sessionUser = getSession();
+            const mainDiv = document.getElementById('mainContent');
+            const userNameSpan = document.getElementById('userNameDisplay');
+            const authBtn = document.getElementById('authBtn');
+            
+            if (!sessionUser) {
+                userNameSpan.textContent = 'Chưa đăng nhập';
+                authBtn.textContent = 'Đăng nhập';
+                authBtn.onclick = () => renderAuthModal();
+                mainDiv.innerHTML = renderGuestHome();
+                
+                document.querySelectorAll('.buy-btn').forEach(btn => {
+                    btn.onclick = () => purchaseKey(btn.dataset.id);
+                });
+            } 
+            else if (sessionUser.role === 'admin') {
+                userNameSpan.textContent = `👑 ${sessionUser.fullname}`;
+                authBtn.textContent = 'Đăng xuất';
+                authBtn.onclick = () => logout();
+                mainDiv.innerHTML = renderAdminDashboard(sessionUser);
+                
+                document.getElementById('createKeyBtn')?.addEventListener('click', showCreateKeyModal);
+                document.getElementById('refreshBtn')?.addEventListener('click', () => renderApp());
+                document.querySelectorAll('.delete-key').forEach(btn => {
+                    btn.onclick = () => { if(confirm('Xóa key này?')) deleteKey(btn.dataset.id); };
+                });
+                document.querySelectorAll('.delete-user').forEach(btn => {
+                    btn.onclick = () => {
+                        if(confirm('Xóa người dùng này?')) {
+                            let users = getUsers();
+                            users = users.filter(u => u.id !== btn.dataset.id);
+                            saveUsers(users);
+                            renderApp();
+                            showToast('Đã xóa người dùng');
+                        }
+                    };
+                });
+            } 
+            else {
+                userNameSpan.textContent = `👤 ${sessionUser.fullname}`;
+                authBtn.textContent = 'Đăng xuất';
+                authBtn.onclick = () => logout();
+                mainDiv.innerHTML = renderUserDashboard(sessionUser);
+                
+                document.querySelectorAll('.buy-btn').forEach(btn => {
+                    btn.onclick = () => purchaseKey(btn.dataset.id);
+                });
+            }
+        }
+
+        renderApp();
+    </script>
+</body>
+</html>
