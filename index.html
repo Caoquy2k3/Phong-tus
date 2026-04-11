@@ -2,866 +2,343 @@
 <html lang="vi">
 <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no"/>
-    <title>PHONG-TUS | SECURE KEY SYSTEM</title>
-    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+    <title>Key Ngày Hôm Nay Là</title>
     <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-        
         body {
-            font-family: 'Orbitron', 'Courier New', monospace;
-            background: #0a0a0f;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #f9f5f3;
+            margin: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
             min-height: 100vh;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            position: relative;
-            overflow-x: hidden;
         }
-        
-        .cyber-bg {
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            z-index: 0;
-        }
-        
-        .cyber-bg::before {
-            content: '';
-            position: absolute;
-            width: 100%;
-            height: 100%;
-            background: radial-gradient(ellipse at 20% 30%, #0a0a1a, #050508);
-            z-index: 0;
-        }
-        
-        .cyber-bg::after {
-            content: '';
-            position: absolute;
-            width: 100%;
-            height: 100%;
-            background-image: 
-                linear-gradient(rgba(0, 255, 255, 0.03) 1px, transparent 1px),
-                linear-gradient(90deg, rgba(0, 255, 255, 0.03) 1px, transparent 1px);
-            background-size: 30px 30px;
-            z-index: 1;
-        }
-        
-        .noise-overlay {
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background-image: url('data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIzMDAiIGhlaWdodD0iMzAwIj48ZmlsdGVyIGlkPSJmIj48ZmVUdXJidWxlbmNlIHR5cGU9ImZyYWN0YWxOb2lzZSIgYmFzZUZyZXF1ZW5jeT0iLjciIG51bU9jdGF2ZXM9IjMiLz48L2ZpbHRlcj48cmVjdCB3aWR0aD0iMTAwJSIgaGVpZ2h0PSIxMDAlIiBmaWx0ZXI9InVybCgjZikiIG9wYWNpdHk9IjAuMDYiLz48L3N2Zz4=');
-            background-repeat: repeat;
-            opacity: 0.08;
-            pointer-events: none;
-            z-index: 2;
-        }
-        
-        .scanline {
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background: linear-gradient(to bottom, transparent 50%, rgba(0, 255, 255, 0.02) 50%);
-            background-size: 100% 4px;
-            pointer-events: none;
-            z-index: 3;
-            animation: scanMove 8s linear infinite;
-        }
-        
-        @keyframes scanMove {
-            0% { transform: translateY(-100%); }
-            100% { transform: translateY(100%); }
-        }
-        
-        @keyframes flicker {
-            0%, 100% { opacity: 1; }
-            95% { opacity: 0.3; }
-            96% { opacity: 0.8; }
-            97% { opacity: 0.2; }
-            98% { opacity: 0.9; }
-            99% { opacity: 0.4; }
-        }
-        
-        .cyber-container {
-            position: relative;
-            z-index: 10;
-            width: 90%;
-            max-width: 600px;
+        .loading-container {
+            text-align: center;
             padding: 20px;
+            border: 2px solid #ef8682;
+            border-radius: 10px;
+            box-shadow: 0 0 20px rgba(0,0,0,0.2);
+            background-color: #fff;
+            width: 80vw;
+            max-width: 420px;
         }
-        
-        .cyber-card {
-            background: rgba(8, 8, 16, 0.75);
-            backdrop-filter: blur(12px);
-            border-radius: 20px;
-            border: 1px solid rgba(0, 255, 255, 0.3);
-            padding: 32px 28px;
-            box-shadow: 0 0 40px rgba(0, 255, 255, 0.1);
-            transition: all 0.4s ease;
+        h1 { color: #03fcec; font-size: 28px; margin-bottom: 12px; }
+        .key-label { font-size: 14px; color: #888; margin-bottom: 5px; }
+        .key-container { display:flex; flex-direction:column; align-items:center; }
+        input {
+            text-align:center; width:80%; padding:12px; margin-bottom:12px;
+            border:2px solid #fc0303; border-radius:8px; font-size:16px;
+            background:#f8f8f8; font-weight:bold;
         }
-        
-        .cyber-card:hover {
-            border-color: rgba(0, 255, 255, 0.7);
-            box-shadow: 0 0 50px rgba(0, 255, 255, 0.2);
+        .button-group { display:flex; gap:10px; justify-content:center; flex-wrap:wrap; }
+        button {
+            background-color:#ef8682; color:#fff; padding:12px 18px; border:none;
+            border-radius:8px; cursor:pointer; font-size:15px; min-width:140px;
         }
-        
-        .glitch-text {
-            font-size: 34px;
-            font-weight: 800;
-            background: linear-gradient(135deg, #00ffff, #8a2be2, #ff00ff);
-            -webkit-background-clip: text;
-            background-clip: text;
-            color: transparent;
-            text-align: center;
-            letter-spacing: 3px;
-            animation: flicker 3s infinite;
-        }
-        
-        .subtitle {
-            text-align: center;
-            font-size: 11px;
-            color: #00ffff;
-            opacity: 0.6;
-            letter-spacing: 2px;
-            margin-top: 8px;
-        }
-        
-        .key-card {
-            background: rgba(0, 0, 0, 0.6);
-            border-radius: 16px;
-            padding: 20px;
-            margin: 24px 0;
-            border: 1px solid rgba(0, 255, 255, 0.2);
-        }
-        
-        .key-label {
-            font-size: 10px;
-            color: #8a2be2;
-            text-transform: uppercase;
-            letter-spacing: 3px;
-            margin-bottom: 12px;
-        }
-        
-        .key-value {
-            width: 100%;
-            padding: 14px;
-            background: rgba(0, 0, 0, 0.8);
-            border: 1px solid #00ffff;
-            border-radius: 12px;
-            font-size: 14px;
-            font-weight: bold;
-            text-align: center;
-            color: #00ffff;
-            font-family: 'Orbitron', monospace;
-            letter-spacing: 1px;
-            animation: borderPulse 2s infinite;
-        }
-        
-        @keyframes borderPulse {
-            0%, 100% { border-color: rgba(0, 255, 255, 0.5); box-shadow: 0 0 5px rgba(0, 255, 255, 0.2); }
-            50% { border-color: rgba(0, 255, 255, 0.9); box-shadow: 0 0 15px rgba(0, 255, 255, 0.4); }
-        }
-        
-        .status-badge {
-            display: inline-flex;
-            align-items: center;
-            gap: 8px;
-            margin-top: 14px;
-            padding: 6px 16px;
-            background: rgba(0, 255, 255, 0.08);
-            border: 1px solid rgba(0, 255, 255, 0.3);
-            border-radius: 30px;
-            font-size: 10px;
-            color: #00ffff;
-        }
-        
-        .status-dot {
-            width: 6px;
-            height: 6px;
-            background: #00ff00;
-            border-radius: 50%;
-            animation: pulseDot 1.5s infinite;
-        }
-        
-        @keyframes pulseDot {
-            0%, 100% { opacity: 1; }
-            50% { opacity: 0.3; }
-        }
-        
-        .button-group {
-            display: flex;
-            gap: 16px;
-            margin: 24px 0 20px;
-        }
-        
-        .cyber-btn {
-            flex: 1;
-            padding: 14px 20px;
-            background: linear-gradient(135deg, rgba(0, 255, 255, 0.15), rgba(138, 43, 226, 0.15));
-            border: 1px solid rgba(0, 255, 255, 0.4);
-            border-radius: 12px;
-            color: #00ffff;
-            font-family: 'Orbitron', monospace;
-            font-weight: 600;
-            font-size: 13px;
-            letter-spacing: 1.5px;
-            cursor: pointer;
-            transition: all 0.3s;
-        }
-        
-        .cyber-btn:hover {
-            border-color: #00ffff;
-            box-shadow: 0 0 20px rgba(0, 255, 255, 0.4);
-            transform: translateY(-2px);
-        }
-        
-        .btn-copy {
-            background: linear-gradient(135deg, rgba(0, 255, 255, 0.25), rgba(0, 150, 200, 0.25));
-        }
-        
-        /* ✅ FIX 2: CSS cho music-playing */
-        .music-playing {
-            border-color: #00ff00 !important;
-            box-shadow: 0 0 20px rgba(0,255,0,0.4);
-            color: #00ff00 !important;
-            background: linear-gradient(135deg, rgba(0, 255, 0, 0.2), rgba(0, 100, 0, 0.2));
-        }
-        
-        @keyframes copyFlash {
-            0% { transform: scale(1); }
-            50% { transform: scale(0.98); background: #00ff00; box-shadow: 0 0 30px #00ff00; }
-            100% { transform: scale(1); }
-        }
-        
-        .copy-flash {
-            animation: copyFlash 0.4s ease;
-        }
-        
-        .info-card {
-            background: rgba(0, 0, 0, 0.4);
-            border-radius: 12px;
-            padding: 16px;
-            margin-top: 20px;
-            border-left: 3px solid #00ffff;
-        }
-        
-        .info-line {
-            display: flex;
-            justify-content: space-between;
-            font-size: 10px;
-            padding: 5px 0;
-        }
-        
-        .info-label {
-            color: #8a2be2;
-        }
-        
-        .info-value {
-            color: #00ffff;
-        }
-        
-        .cyber-footer {
-            text-align: center;
-            margin-top: 24px;
-            font-size: 9px;
-            color: rgba(0, 255, 255, 0.3);
-        }
-        
-        .cyber-footer a {
-            color: rgba(0, 255, 255, 0.5);
-            text-decoration: none;
-        }
-        
-        .cyber-footer a:hover {
-            color: #00ffff;
-        }
-        
-        .snow-container {
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            pointer-events: none;
-            z-index: 5;
-            overflow: hidden;
-        }
-        
-        .cyber-snow {
-            position: absolute;
-            top: -10px;
-            border-radius: 50%;
-            background: linear-gradient(135deg, #00ffff, #8a2be2);
-            opacity: 0.4;
-            pointer-events: none;
-            animation: fall linear infinite;
-            filter: blur(1px);
-        }
-        
-        @keyframes fall {
-            to {
-                transform: translateY(100vh) rotate(360deg);
-            }
-        }
-        
-        .snow-toggle {
-            position: fixed;
-            bottom: 20px;
-            left: 20px;
-            background: rgba(0, 0, 0, 0.6);
-            backdrop-filter: blur(8px);
-            border: 1px solid rgba(0, 255, 255, 0.3);
-            border-radius: 30px;
-            padding: 6px 14px;
-            font-size: 9px;
-            color: #00ffff;
-            cursor: pointer;
-            z-index: 100;
-            font-family: 'Orbitron', monospace;
-            transition: all 0.3s;
-        }
-        
-        .snow-toggle:hover {
-            border-color: #00ffff;
-            box-shadow: 0 0 10px rgba(0, 255, 255, 0.3);
-        }
-        
-        .loading-overlay {
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background: rgba(0, 0, 0, 0.9);
-            backdrop-filter: blur(8px);
-            z-index: 1000;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            opacity: 0;
-            visibility: hidden;
-            transition: all 0.3s;
-        }
-        
-        .loading-overlay.active {
-            opacity: 1;
-            visibility: visible;
-        }
-        
-        .loader {
-            text-align: center;
-        }
-        
-        .loader-text {
-            color: #00ffff;
-            font-size: 14px;
-            letter-spacing: 3px;
-            margin-top: 20px;
-            animation: blink 1s infinite;
-        }
-        
-        .loader-spinner {
-            width: 50px;
-            height: 50px;
-            border: 2px solid rgba(0, 255, 255, 0.2);
-            border-top: 2px solid #00ffff;
-            border-radius: 50%;
-            animation: spin 1s linear infinite;
-        }
-        
-        @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
-        }
-        
-        @keyframes blink {
-            0%, 100% { opacity: 1; }
-            50% { opacity: 0.5; }
-        }
-        
-        .toast {
-            position: fixed;
-            bottom: 30px;
-            left: 50%;
-            transform: translateX(-50%);
-            padding: 12px 24px;
-            background: rgba(0, 255, 255, 0.9);
-            color: #000;
-            font-weight: bold;
-            border-radius: 8px;
-            font-family: monospace;
-            z-index: 9999;
-            font-size: 12px;
-            animation: fadeOut 2.5s forwards;
-        }
-        
-        @keyframes fadeOut {
-            0% { opacity: 1; }
-            70% { opacity: 1; }
-            100% { opacity: 0; visibility: hidden; }
-        }
-        
-        .toast-warning {
-            background: rgba(255, 0, 0, 0.9);
-        }
-        
-        #player {
-            display: none;
-        }
-        
-        @media (max-width: 550px) {
-            .cyber-card { padding: 24px 18px; }
-            .glitch-text { font-size: 24px; }
-            .key-value { font-size: 11px; }
-            .cyber-btn { font-size: 11px; padding: 12px; }
-        }
+        button:hover { background-color:#e9514d; }
+        .footer { text-align:center; margin-top:16px; color:#555; font-size:14px; }
+        #player { display:none; } /* youtube player hidden */
     </style>
 </head>
 <body>
-    <div class="cyber-bg"></div>
-    <div class="noise-overlay"></div>
-    <div class="scanline"></div>
+    <!-- Hidden container for YouTube player (kept hidden) -->
     <div id="player"></div>
-    
-    <div class="snow-container" id="snowContainer"></div>
-    <div class="snow-toggle" id="snowToggle">❄️ SNOW</div>
-    
-    <div class="loading-overlay" id="loadingOverlay">
-        <div class="loader">
-            <div class="loader-spinner"></div>
-            <div class="loader-text">INITIALIZING SECURE SYSTEM...</div>
-        </div>
-    </div>
-    
-    <div class="cyber-container">
-        <div class="cyber-card">
-            <div class="glitch-text" data-text="PHONG-TUS">PHONG-TUS</div>
-            <div class="subtitle">[ SECURE KEY RECEIVER ]</div>
-            
-            <div class="key-card">
-                <div class="key-label">┌─ ACCESS KEY ─┐</div>
-                <input type="text" id="keyInput" class="key-value" readonly />
-                <div class="status-badge">
-                    <span class="status-dot"></span>
-                    <span id="statusText">AWAITING KEY FROM TOOL</span>
-                </div>
-            </div>
-            
+
+    <div class="loading-container">
+        <h1>🔑 KEY CỦA BẠN LÀ</h1>
+        <div class="key-label">(Key tự động tạo hoặc lấy từ tham số ma)</div>
+
+        <div class="key-container">
+            <input type="text" id="keyInput" readonly />
             <div class="button-group">
-                <button id="copyButton" class="cyber-btn btn-copy">📋 COPY KEY</button>
-                <button id="musicButton" class="cyber-btn btn-music">🎵 ACTIVATE AUDIO</button>
-            </div>
-            
-            <div class="info-card">
-                <div class="info-line">
-                    <span class="info-label">[ SYSTEM STATUS ]</span>
-                    <span class="info-value" id="systemStatus">SECURE MODE</span>
-                </div>
-                <!-- ✅ FIX 1: Đã thêm sessionId vào đây -->
-                <div class="info-line">
-                    <span class="info-label">[ SESSION ID ]</span>
-                    <span class="info-value" id="sessionId">----</span>
-                </div>
-                <div class="info-line">
-                    <span class="info-label">[ KEY SOURCE ]</span>
-                    <span class="info-value">TOOL GENERATED ONLY</span>
-                </div>
-                <div class="info-line">
-                    <span class="info-label">[ TIME STAMP ]</span>
-                    <span class="info-value" id="timestamp">--:--:--</span>
-                </div>
-                <div class="info-line">
-                    <span class="info-label">[ KEY STATUS ]</span>
-                    <span class="info-value" id="keyStatus">⚠️ NO KEY</span>
-                </div>
-            </div>
-            
-            <div class="cyber-footer">
-                <span>© PHONG-TUS SECURE SYSTEM</span> | 
-                <a href="https://t.me/se_meo_bao_an" target="_blank">[ TELEGRAM NODE ]</a> | 
-                <span id="dateDisplay"></span>
+                <button id="copyButton">📋 Copy Key</button>
+                <button id="musicButton">▶️ Play Music</button>
             </div>
         </div>
+
+        <div id="dateDisplay" style="margin-top:10px; font-size:18px; color:#555;"></div>
+        <div class="footer">
+            <b>Copyright By
+                <a href="https://zalo.me/0822771058" style="color:#ef8682; text-decoration:none;">Nguyễn Duy Khánh</a>
+                | Time: <span id="clock"></span>
+            </b>
+        </div>
     </div>
-    
-    <script>
-    /* ===== PHONG-TUS SECURE KEY SYSTEM v6.1 (FIXED) =====
-       - Đã thêm sessionId vào HTML
-       - Đã thêm CSS music-playing
-       - Đã sửa logic music toggle không bị treo
-       - Đã fix race condition YouTube API
-    ============================================*/
-    
-    (function() {
-        const PREFIX = "PHONG-TUS-";
-        
-        // === LOADING SCREEN ===
-        const loadingOverlay = document.getElementById('loadingOverlay');
-        function showLoading(show) {
-            if (show) {
-                loadingOverlay.classList.add('active');
-            } else {
-                loadingOverlay.classList.remove('active');
+
+<script>
+/* ==== Safe key gen + localStorage handling ====
+   - Format: PHONG-TUS- + 16 ký tự [A-Z0-9]
+   - If ?ma present -> show it (only if valid format), else generate unique random key
+   - Saves used keys in localStorage 'usedKeys' (array)
+   - Updates URL with ?ma=KEY using history.replaceState
+   - Exposes small helpers on window.__KEY_UTILS
+=============================================*/
+(function(){
+  const PREFIX = "PHONG-TUS-";
+  const RANDOM_LEN = 16;
+  const CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+
+  function generateRandomKey() {
+    let p = "";
+    for (let i = 0; i < RANDOM_LEN; i++) {
+      p += CHARS.charAt(Math.floor(Math.random() * CHARS.length));
+    }
+    return PREFIX + p;
+  }
+
+  function _loadUsed() {
+    try {
+      const raw = localStorage.getItem("usedKeys");
+      const arr = raw ? JSON.parse(raw) : [];
+      return Array.isArray(arr) ? arr : [];
+    } catch (e) {
+      return [];
+    }
+  }
+
+  function _saveUsed(arr) {
+    try {
+      localStorage.setItem("usedKeys", JSON.stringify(arr));
+    } catch (e) {
+      // ignore quota errors
+    }
+  }
+
+  function markKeyAsUsed(key){
+    if (!key) return;
+    const used = _loadUsed();
+    if (!used.includes(key)) {
+      used.push(key);
+      _saveUsed(used);
+    }
+  }
+
+  function isKeyUsed(key){
+    if (!key) return false;
+    const used = _loadUsed();
+    return used.includes(key);
+  }
+
+  function generateUniqueKey(maxAttempts = 100) {
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      const k = generateRandomKey();
+      if (!isKeyUsed(k)) {
+        // mark immediately to reduce duplicate generations
+        markKeyAsUsed(k);
+        return k;
+      }
+    }
+    // fallback if exhausted: generate and mark (rare)
+    const fallback = generateRandomKey();
+    markKeyAsUsed(fallback);
+    return fallback;
+  }
+
+  // expose helpers (non-intrusive)
+  window.__KEY_UTILS = {
+    generateRandomKey,
+    generateUniqueKey,
+    markKeyAsUsed,
+    isKeyUsed
+  };
+
+  function getParam(name) {
+    try {
+      const u = new URL(window.location.href);
+      return u.searchParams.get(name);
+    } catch (e) {
+      const m = window.location.search.match(new RegExp('[?&]' + name + '=([^&]+)'));
+      return m ? decodeURIComponent(m[1]) : null;
+    }
+  }
+
+  // decide final key: prefer valid ?ma param, otherwise generate unique
+  const keyInput = document.getElementById('keyInput');
+  let keyFromUrl = getParam('ma');
+  function isValidFormat(k) {
+    return typeof k === "string" && k.startsWith(PREFIX) && k.length === (PREFIX.length + RANDOM_LEN);
+  }
+
+  let finalKey;
+  if (isValidFormat(keyFromUrl)) {
+    finalKey = keyFromUrl.trim();
+    // mark it used (optional) - comment out if you don't want to mark keys from URL
+    markKeyAsUsed(finalKey);
+  } else {
+    finalKey = generateUniqueKey();
+    // update URL without reload for easy copying / verification
+    try {
+      const newUrl = window.location.origin + window.location.pathname + "?ma=" + encodeURIComponent(finalKey);
+      history.replaceState({}, "", newUrl);
+    } catch (e) { /* ignore */ }
+  }
+
+  // display finalKey
+  if (keyInput) keyInput.value = finalKey;
+
+  // copy helper (used by button)
+  function fallbackCopy(text) {
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.setAttribute("readonly", "");
+    ta.style.position = "absolute";
+    ta.style.left = "-9999px";
+    document.body.appendChild(ta);
+    ta.select();
+    try { document.execCommand("copy"); alert("Copied: " + text); }
+    catch(e) { prompt("Copy the key manually:", text); }
+    document.body.removeChild(ta);
+  }
+
+  function copyText(t){
+    if (!t) return;
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(t).then(()=> {
+        // optional toast: using alert for simplicity
+        // alert("Copied: " + t);
+      }).catch(()=> fallbackCopy(t));
+    } else fallbackCopy(t);
+  }
+
+  // If other code expects handleQueryParams/getkey, keep compatible:
+  window.handleQueryParams = function(){
+    const params = new URLSearchParams(window.location.search);
+    const getkey = params.get('getkey');
+    if (getkey === '1') {
+      const newKey = generateUniqueKey();
+      if (keyInput) keyInput.value = newKey;
+      markKeyAsUsed(newKey);
+      try {
+        const newUrl = window.location.origin + window.location.pathname + "?ma=" + encodeURIComponent(newKey);
+        history.replaceState({}, "", newUrl);
+      } catch(e){}
+    } else {
+      // nothing to do: finalKey already set above
+    }
+  };
+
+  // wire copy button if exists
+  const copyBtn = document.getElementById('copyButton');
+  if (copyBtn) {
+    copyBtn.addEventListener('click', async function(){
+      await copyText(finalKey);
+      // small UI feedback
+      const originalText = copyBtn.textContent;
+      copyBtn.textContent = '✅ Đã copy!';
+      setTimeout(()=> copyBtn.textContent = originalText, 1800);
+      // mark used on copy
+      markKeyAsUsed(finalKey);
+    });
+  }
+
+})();
+</script>
+
+<script>
+/* ---------- Time display ---------- */
+function updateTime(){
+    const now = new Date();
+    const hh = String(now.getHours()).padStart(2,'0');
+    const mm = String(now.getMinutes()).padStart(2,'0');
+    const ss = String(now.getSeconds()).padStart(2,'0');
+    const d = now.getDate(), m = now.getMonth()+1, y = now.getFullYear();
+    document.getElementById('clock').textContent = `${hh}:${mm}:${ss}`;
+    document.getElementById('dateDisplay').textContent = `Hôm nay là ngày ${d}/${m}/${y}`;
+    document.title = `Key Ngày ${d}/${m}/${y} Là`;
+    setTimeout(updateTime, 1000);
+}
+
+/* ---------- YouTube Player API integration ---------- */
+/* Sử dụng video ID từ YouTube link bạn gửi: UKox4YEvLpg */
+let ytPlayer;
+let ytPlayerReady = false;
+let ytPlayerInitializing = false;
+let playWhenReady = false;
+const YT_VIDEO_ID = 'UKox4YEvLpg'; // đổi nếu cần
+// tải API
+function initYouTubePlayer(){
+    if (ytPlayerInitializing || typeof YT !== 'undefined' && ytPlayer) return;
+    ytPlayerInitializing = true;
+    // inject YT iframe api script if not present
+    if (!document.getElementById('yt-iframe-api')) {
+        const tag = document.createElement('script');
+        tag.id = 'yt-iframe-api';
+        tag.src = "https://www.youtube.com/iframe_api";
+        document.head.appendChild(tag);
+    }
+    // onYouTubeIframeAPIReady sẽ được gọi bởi API khi script load
+}
+
+// API callback (YouTube yêu cầu hàm toàn cục)
+function onYouTubeIframeAPIReady(){
+    ytPlayer = new YT.Player('player', {
+        height: '0',
+        width: '0',
+        videoId: YT_VIDEO_ID,
+        playerVars: {
+            autoplay: 0,
+            controls: 0,
+            rel: 0,
+            modestbranding: 1,
+            playsinline: 1
+        },
+        events: {
+            'onReady': function(e){
+                ytPlayerReady = true;
+                ytPlayerInitializing = false;
+                try { ytPlayer.setVolume(60); } catch(e){}
+                if (playWhenReady) {
+                    ytPlayer.seekTo(0);
+                    ytPlayer.playVideo();
+                    playWhenReady = false;
+                    musicButtonUpdateState(true);
+                }
+            },
+            'onStateChange': function(event){
+                if (event.data === 0) {
+                    musicButtonUpdateState(false);
+                }
             }
         }
-        
-        showLoading(true);
-        setTimeout(() => showLoading(false), 1500);
-        
-        // === CYBER SNOW EFFECT ===
-        let snowEnabled = true;
-        
-        function createCyberSnowflake() {
-            const snow = document.createElement('div');
-            snow.classList.add('cyber-snow');
-            const size = Math.random() * 4 + 1.5;
-            snow.style.width = `${size}px`;
-            snow.style.height = `${size}px`;
-            snow.style.left = `${Math.random() * 100}%`;
-            snow.style.animationDuration = `${Math.random() * 6 + 3}s`;
-            snow.style.animationDelay = `${Math.random() * 5}s`;
-            snow.style.opacity = Math.random() * 0.5 + 0.2;
-            return snow;
-        }
-        
-        function initSnow() {
-            const container = document.getElementById('snowContainer');
-            if (!container) return;
-            container.innerHTML = '';
-            const count = window.innerWidth < 768 ? 80 : 150;
-            for (let i = 0; i < count; i++) {
-                container.appendChild(createCyberSnowflake());
-            }
-        }
-        
-        function removeSnow() {
-            const container = document.getElementById('snowContainer');
-            if (container) container.innerHTML = '';
-        }
-        
-        function toggleSnow() {
-            snowEnabled = !snowEnabled;
-            const toggleBtn = document.getElementById('snowToggle');
-            if (snowEnabled) {
-                initSnow();
-                toggleBtn.innerHTML = '❄️ SNOW';
-                toggleBtn.style.opacity = '1';
-            } else {
-                removeSnow();
-                toggleBtn.innerHTML = '❄️ SNOW OFF';
-                toggleBtn.style.opacity = '0.5';
-            }
-        }
-        
-        // === HÀM TẠO CHECKSUM CHO KEY (CHỈ TOOL MỚI BIẾT) ===
-        function verifyKeyChecksum(key) {
-            if (!key || !key.startsWith(PREFIX)) return false;
-            
-            const randomPart = key.substring(PREFIX.length);
-            if (randomPart.length !== 12) return false;
-            
-            const chars = randomPart.split('');
-            let sum = 0;
-            for (let i = 0; i < 10; i++) {
-                const c = chars[i];
-                let val = 0;
-                if (c >= 'A' && c <= 'Z') val = c.charCodeAt(0) - 55;
-                else if (c >= '0' && c <= '9') val = parseInt(c);
-                sum += val;
-            }
-            
-            const checksum1 = (sum % 26) + 65;
-            const checksum2 = ((sum * 3) % 10) + 48;
-            
-            const expectedChecksum = String.fromCharCode(checksum1) + String.fromCharCode(checksum2);
-            const actualChecksum = randomPart.substring(10, 12);
-            
-            return expectedChecksum === actualChecksum;
-        }
-        
-        // === LẤY KEY TỪ URL PARAMETER 'ma' ===
-        function getKeyFromURL() {
-            try {
-                const url = new URL(window.location.href);
-                return url.searchParams.get('ma');
-            } catch(e) {
-                return null;
-            }
-        }
-        
-        // === KIỂM TRA KEY HỢP LỆ ===
-        function isValidKey(key) {
-            if (!key) return false;
-            const pattern = /^PHONG-TUS-[A-Z0-9]{12}$/;
-            if (!pattern.test(key)) return false;
-            return verifyKeyChecksum(key);
-        }
-        
-        // === HIỂN THỊ KEY TỪ URL ===
-        const keyFromURL = getKeyFromURL();
-        const keyInput = document.getElementById('keyInput');
-        const statusSpan = document.getElementById('statusText');
-        const keyStatusSpan = document.getElementById('keyStatus');
-        
-        let finalKey = null;
-        let isValid = false;
-        
-        if (keyFromURL && isValidKey(keyFromURL)) {
-            finalKey = keyFromURL;
-            isValid = true;
-            if (keyInput) keyInput.value = finalKey;
-            if (statusSpan) statusSpan.textContent = '✓ KEY VERIFIED FROM TOOL';
-            if (keyStatusSpan) {
-                keyStatusSpan.textContent = '✓ VALID SECURE KEY';
-                keyStatusSpan.style.color = '#00ff00';
-            }
-            
-            // ✅ FIX 1: sessionId đã có trong HTML nên sẽ hiển thị
-            const sessionSpan = document.getElementById('sessionId');
-            if (sessionSpan) {
-                const shortId = finalKey.slice(-8);
-                sessionSpan.textContent = `${shortId.slice(0,4)}-${shortId.slice(4,8)}`;
-            }
-            
-            console.log('✅ KEY VERIFIED SUCCESSFULLY');
+    });
+}
+
+/* ---------- Music toggle button ---------- */
+const musicBtn = document.getElementById('musicButton');
+musicBtn.addEventListener('click', toggleMusic);
+
+function toggleMusic(){
+    if (typeof ytPlayer !== 'undefined' && ytPlayerReady) {
+        const state = ytPlayer.getPlayerState();
+        if (state === 1) {
+            ytPlayer.pauseVideo(); musicButtonUpdateState(false);
         } else {
-            if (keyInput) keyInput.value = '';
-            if (statusSpan) statusSpan.textContent = '⚠️ INVALID OR NO KEY';
-            if (keyStatusSpan) {
-                if (keyFromURL && keyFromURL.startsWith(PREFIX)) {
-                    keyStatusSpan.textContent = '❌ INVALID KEY (FRAUD DETECTED)';
-                    keyStatusSpan.style.color = '#ff0000';
-                    console.warn('⚠️ FRAUD DETECTED: Invalid key format or checksum');
-                } else {
-                    keyStatusSpan.textContent = '⚠️ NO KEY - USE TOOL TO GENERATE';
-                    keyStatusSpan.style.color = '#ff8800';
-                }
-            }
-            const sessionSpan = document.getElementById('sessionId');
-            if (sessionSpan) sessionSpan.textContent = '----';
+            ytPlayer.playVideo(); musicButtonUpdateState(true);
         }
-        
-        // === TOAST NOTIFICATION ===
-        function showToast(message, isWarning = false) {
-            const toast = document.createElement('div');
-            toast.textContent = message;
-            toast.className = 'toast';
-            if (isWarning) {
-                toast.classList.add('toast-warning');
-                toast.style.background = 'rgba(255, 0, 0, 0.9)';
-            } else {
-                toast.style.background = 'rgba(0, 255, 255, 0.9)';
-            }
-            document.body.appendChild(toast);
-            setTimeout(() => toast.remove(), 2500);
-        }
-        
-        // === COPY KEY ===
-        async function copyKey() {
-            if (!finalKey || !isValid) {
-                showToast('❌ NO VALID KEY TO COPY! Please get key from tool', true);
-                return;
-            }
-            
-            const copyBtn = document.getElementById('copyButton');
-            copyBtn.classList.add('copy-flash');
-            setTimeout(() => copyBtn.classList.remove('copy-flash'), 400);
-            
-            try {
-                await navigator.clipboard.writeText(finalKey);
-                showToast('✓ KEY COPIED: ' + finalKey);
-            } catch(e) {
-                const textarea = document.createElement('textarea');
-                textarea.value = finalKey;
-                document.body.appendChild(textarea);
-                textarea.select();
-                document.execCommand('copy');
-                document.body.removeChild(textarea);
-                showToast('✓ KEY COPIED: ' + finalKey);
-            }
-            
-            // ✅ FIX 4: Logic music đúng - chỉ play nếu key hợp lệ và chưa play
-            if (finalKey && isValid && !isPlaying) {
-                playMusic();
-            }
-        }
-        
-        // === YOUTUBE MUSIC - FIX RACE CONDITION ===
-        let ytPlayer = null;
-        let ytReady = false;
-        let isPlaying = false;
-        let autoPlayAfterReady = false;
-        const YT_VIDEO_ID = 'UKox4YEvLpg';
-        
-        function createPlayer() {
-            if (ytPlayer) return;
-            ytPlayer = new YT.Player('player', {
-                height: '0',
-                width: '0',
-                videoId: YT_VIDEO_ID,
-                playerVars: { autoplay: 0, controls: 0, modestbranding: 1, playsinline: 1 },
-                events: {
-                    onReady: function() {
-                        ytReady = true;
-                        try { ytPlayer.setVolume(40); } catch(e) {}
-                        // ✅ FIX 5: Xử lý auto play sau khi ready
-                        if (autoPlayAfterReady) {
-                            autoPlayAfterReady = false;
-                            ytPlayer.playVideo();
-                            isPlaying = true;
-                            updateMusicButtonUI(true);
-                        }
-                    },
-                    onStateChange: function(event) {
-                        if (event.data === 1) {
-                            isPlaying = true;
-                            updateMusicButtonUI(true);
-                        } else if (event.data === 2) {
-                            isPlaying = false;
-                            updateMusicButtonUI(false);
-                        }
-                    }
-                }
-            });
-        }
-        
-        function initYouTube() {
-            if (typeof YT !== 'undefined' && YT.loaded) {
-                createPlayer();
-                return;
-            }
-            if (!document.getElementById('yt-api-script')) {
-                const tag = document.createElement('script');
-                tag.id = 'yt-api-script';
-                tag.src = 'https://www.youtube.com/iframe_api';
-                document.head.appendChild(tag);
-            }
-            window.onYouTubeIframeAPIReady = function() {
-                createPlayer();
-            };
-        }
-        
-        function updateMusicButtonUI(playing) {
-            const musicBtn = document.getElementById('musicButton');
-            if (musicBtn) {
-                if (playing) {
-                    musicBtn.innerHTML = '⏸️ AUDIO ACTIVE';
-                    musicBtn.classList.add('music-playing');
-                } else {
-                    musicBtn.innerHTML = '🎵 ACTIVATE AUDIO';
-                    musicBtn.classList.remove('music-playing');
-                }
-            }
-        }
-        
-        // ✅ FIX 5: playMusic an toàn, không bị race condition
-        function playMusic() {
-            if (!finalKey || !isValid) {
-                showToast('⚠️ No valid key to activate audio', true);
-                return;
-            }
-            
-            if (ytPlayer && ytReady) {
-                ytPlayer.playVideo();
-                isPlaying = true;
-                updateMusicButtonUI(true);
-            } else {
-                initYouTube();
-                autoPlayAfterReady = true;
-            }
-        }
-        
-        function pauseMusic() {
-            if (ytPlayer && ytReady) {
-                ytPlayer.pauseVideo();
-                isPlaying = false;
-                updateMusicButtonUI(false);
-            }
-        }
-        
-        // ✅ FIX 4: Toggle music đúng logic, không bị treo
-        function toggleMusic() {
-            if (!finalKey || !isValid) {
-                showToast('⚠️ No valid key available', true);
-                return;
-            }
-            
-            if (!ytReady && !ytPlayer) {
-                initYouTube();
-                autoPlayAfterReady = true;
-            } else if (isPlaying) {
-                pauseMusic();
-            } else {
-                playMusic();
-            }
-        }
-        
-        // === TIME DISPLAY ===
-        function updateTime() {
-            const now = new Date();
-            const hh = String(now.getHours()).padStart(2, '0');
-            const mm = String(now.getMinutes()).padStart(2, '0');
-            const ss = String(now.getSeconds()).padStart(2, '0');
-            const d = now.getDate();
-            const m = now.getMonth() + 1;
-            const y = now.getFullYear();
-            
-            const timestampSpan = document.getElementById('timestamp');
-            if (timestampSpan) timestampSpan.textContent = `${hh}:${mm}:${ss}`;
-            
-            const dateSpan = document.getElementById('dateDisplay');
-            if (dateSpan) dateSpan.textContent = `${d}/${m}/${y}`;
-            
-            setTimeout(updateTime, 1000);
-        }
-        
-        // === EVENT LISTENERS ===
-        const copyBtn = document.getElementById('copyButton');
-        if (copyBtn) copyBtn.addEventListener('click', copyKey);
-        
-        const musicBtn = document.getElementById('musicButton');
-        if (musicBtn) musicBtn.addEventListener('click', toggleMusic);
-        
-        const snowToggle = document.getElementById('snowToggle');
-        if (snowToggle) snowToggle.addEventListener('click', toggleSnow);
-        
-        // === INITIALIZATION ===
-        window.addEventListener('load', function() {
-            updateTime();
-            initSnow();
-            
-            console.log('🔐 PHONG-TUS SECURE KEY SYSTEM v6.1 (ALL FIXED)');
-            console.log('📡 KEY STATUS:', finalKey ? (isValid ? 'VALID' : 'INVALID') : 'NO KEY');
-            if (finalKey && isValid) {
-                console.log('✅ SECURE KEY:', finalKey);
-            } else if (finalKey && !isValid) {
-                console.warn('⚠️ FRAUD DETECTED: Invalid key');
-            } else {
-                console.log('⚠️ Waiting for key from tool');
-            }
-        });
-        
-        // Resize handler for snow
-        let resizeTimeout;
-        window.addEventListener('resize', function() {
-            if (snowEnabled) {
-                clearTimeout(resizeTimeout);
-                resizeTimeout = setTimeout(() => initSnow(), 500);
-            }
-        });
-        
-    })();
-    </script>
+    } else {
+        initYouTubePlayer();
+        playWhenReady = true;
+        musicButtonUpdateState(true, '...Loading');
+    }
+}
+
+function musicButtonUpdateState(isPlaying, overrideText){
+    if (overrideText) {
+        musicBtn.textContent = '⏳ ' + overrideText;
+        return;
+    }
+    musicBtn.textContent = isPlaying ? '⏸️ Pause Music' : '▶️ Play Music';
+}
+
+/* ---------- Init ---------- */
+window.addEventListener('load', function(){
+    updateTime();
+    // keep compatibility: if legacy code calls handleQueryParams, it exists
+    if (typeof handleQueryParams === 'function') handleQueryParams();
+    initYouTubePlayer(); // khởi động sớm (không autoplay) để sẵn sàng khi người dùng copy
+});
+</script>
 </body>
 </html>
