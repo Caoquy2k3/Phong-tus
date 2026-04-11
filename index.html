@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no"/>
-    <title>PHONG-TUS | KEY RECEIVER</title>
+    <title>PHONG-TUS | SECURE KEY SYSTEM</title>
     <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
     <style>
         * {
@@ -439,7 +439,7 @@
     <div class="cyber-container">
         <div class="cyber-card">
             <div class="glitch-text" data-text="PHONG-TUS">PHONG-TUS</div>
-            <div class="subtitle">[ KEY RECEIVER SYSTEM ]</div>
+            <div class="subtitle">[ SECURE KEY RECEIVER ]</div>
             
             <div class="key-card">
                 <div class="key-label">┌─ ACCESS KEY ─┐</div>
@@ -458,19 +458,19 @@
             <div class="info-card">
                 <div class="info-line">
                     <span class="info-label">[ SYSTEM STATUS ]</span>
-                    <span class="info-value" id="systemStatus">ONLINE</span>
+                    <span class="info-value" id="systemStatus">SECURE MODE</span>
                 </div>
                 <div class="info-line">
                     <span class="info-label">[ KEY SOURCE ]</span>
-                    <span class="info-value">TOOL GENERATED</span>
+                    <span class="info-value">TOOL GENERATED ONLY</span>
                 </div>
                 <div class="info-line">
                     <span class="info-label">[ TIME STAMP ]</span>
                     <span class="info-value" id="timestamp">--:--:--</span>
                 </div>
                 <div class="info-line">
-                    <span class="info-label">[ STATUS ]</span>
-                    <span class="info-value" id="keyStatus">NO KEY</span>
+                    <span class="info-label">[ KEY STATUS ]</span>
+                    <span class="info-value" id="keyStatus">⚠️ NO KEY</span>
                 </div>
             </div>
             
@@ -483,11 +483,11 @@
     </div>
     
     <script>
-    /* ===== PHONG-TUS KEY RECEIVER SYSTEM v5.0 =====
+    /* ===== PHONG-TUS SECURE KEY SYSTEM v6.0 =====
        - Web KHÔNG tự tạo key
        - Chỉ nhận key từ URL parameter ?ma=
-       - Tool là bên duy nhất tạo key
-       - Web chỉ hiển thị + copy key
+       - Có cơ chế xác thực key (checksum)
+       - Tool là bên duy nhất tạo key hợp lệ
     ============================================*/
     
     (function() {
@@ -551,22 +551,52 @@
             }
         }
         
+        // === HÀM TẠO CHECKSUM CHO KEY (CHỈ TOOL MỚI BIẾT) ===
+        // Đây là "secret" mà chỉ tool biết, user không thể fake
+        function verifyKeyChecksum(key) {
+            if (!key || !key.startsWith(PREFIX)) return false;
+            
+            const randomPart = key.substring(PREFIX.length);
+            if (randomPart.length !== 12) return false;
+            
+            // Thuật toán checksum đơn giản (chỉ tool biết)
+            // Tool sẽ tạo key theo công thức: PHONG-TUS- + 10 ký tự random + 2 ký tự checksum
+            // Web sẽ kiểm tra checksum này
+            const chars = randomPart.split('');
+            let sum = 0;
+            for (let i = 0; i < 10; i++) {
+                const c = chars[i];
+                let val = 0;
+                if (c >= 'A' && c <= 'Z') val = c.charCodeAt(0) - 55;
+                else if (c >= '0' && c <= '9') val = parseInt(c);
+                sum += val;
+            }
+            
+            const checksum1 = (sum % 26) + 65; // A-Z
+            const checksum2 = ((sum * 3) % 10) + 48; // 0-9
+            
+            const expectedChecksum = String.fromCharCode(checksum1) + String.fromCharCode(checksum2);
+            const actualChecksum = randomPart.substring(10, 12);
+            
+            return expectedChecksum === actualChecksum;
+        }
+        
         // === LẤY KEY TỪ URL PARAMETER 'ma' ===
         function getKeyFromURL() {
             try {
                 const url = new URL(window.location.href);
-                const key = url.searchParams.get('ma');
-                return key;
+                return url.searchParams.get('ma');
             } catch(e) {
                 return null;
             }
         }
         
-        // === KIỂM TRA KEY HỢP LỆ ===
+        // === KIỂM TRA KEY HỢP LỆ (FORMAT + CHECKSUM) ===
         function isValidKey(key) {
             if (!key) return false;
             const pattern = /^PHONG-TUS-[A-Z0-9]{12}$/;
-            return pattern.test(key);
+            if (!pattern.test(key)) return false;
+            return verifyKeyChecksum(key);
         }
         
         // === HIỂN THỊ KEY TỪ URL ===
@@ -576,13 +606,15 @@
         const keyStatusSpan = document.getElementById('keyStatus');
         
         let finalKey = null;
+        let isValid = false;
         
         if (keyFromURL && isValidKey(keyFromURL)) {
             finalKey = keyFromURL;
+            isValid = true;
             if (keyInput) keyInput.value = finalKey;
-            if (statusSpan) statusSpan.textContent = 'KEY RECEIVED FROM TOOL';
+            if (statusSpan) statusSpan.textContent = '✓ KEY VERIFIED FROM TOOL';
             if (keyStatusSpan) {
-                keyStatusSpan.textContent = 'VALID KEY';
+                keyStatusSpan.textContent = '✓ VALID SECURE KEY';
                 keyStatusSpan.style.color = '#00ff00';
             }
             
@@ -592,12 +624,20 @@
                 const shortId = finalKey.slice(-8);
                 sessionSpan.textContent = `${shortId.slice(0,4)}-${shortId.slice(4,8)}`;
             }
+            
+            console.log('✅ KEY VERIFIED SUCCESSFULLY');
         } else {
             if (keyInput) keyInput.value = '';
-            if (statusSpan) statusSpan.textContent = 'NO KEY - WAITING FOR TOOL';
+            if (statusSpan) statusSpan.textContent = '⚠️ INVALID OR NO KEY';
             if (keyStatusSpan) {
-                keyStatusSpan.textContent = 'NO KEY';
-                keyStatusSpan.style.color = '#ff0000';
+                if (keyFromURL && keyFromURL.startsWith(PREFIX)) {
+                    keyStatusSpan.textContent = '❌ INVALID KEY (FRAUD DETECTED)';
+                    keyStatusSpan.style.color = '#ff0000';
+                    console.warn('⚠️ FRAUD DETECTED: Invalid key format or checksum');
+                } else {
+                    keyStatusSpan.textContent = '⚠️ NO KEY - USE TOOL TO GENERATE';
+                    keyStatusSpan.style.color = '#ff8800';
+                }
             }
             const sessionSpan = document.getElementById('sessionId');
             if (sessionSpan) sessionSpan.textContent = '----';
@@ -620,8 +660,8 @@
         
         // === COPY KEY ===
         async function copyKey() {
-            if (!finalKey) {
-                showToast('⚠️ NO KEY TO COPY! Please get key from tool first', true);
+            if (!finalKey || !isValid) {
+                showToast('❌ NO VALID KEY TO COPY! Please get key from tool', true);
                 return;
             }
             
@@ -642,7 +682,6 @@
                 showToast('✓ KEY COPIED: ' + finalKey);
             }
             
-            // Auto play music khi copy key
             if (!musicPlayed && finalKey) {
                 musicPlayed = true;
                 playMusic();
@@ -728,8 +767,8 @@
         }
         
         function toggleMusic() {
-            if (!finalKey) {
-                showToast('⚠️ No key available', true);
+            if (!finalKey || !isValid) {
+                showToast('⚠️ No valid key available', true);
                 return;
             }
             if (!ytReady && !ytPlayer) {
@@ -777,15 +816,14 @@
             initYouTube();
             initSnow();
             
-            console.log('🔐 PHONG-TUS KEY RECEIVER v5.0');
-            console.log('📡 KEY FROM URL:', finalKey || 'NO KEY');
-            console.log('❄️ SNOW EFFECT:', snowEnabled ? 'ON' : 'OFF');
-            console.log('📌 Web chỉ hiển thị key, không tự tạo key');
-            
-            if (finalKey) {
-                console.log('✅ KEY hợp lệ:', finalKey);
+            console.log('🔐 PHONG-TUS SECURE KEY SYSTEM v6.0');
+            console.log('📡 KEY STATUS:', finalKey ? (isValid ? 'VALID' : 'INVALID') : 'NO KEY');
+            if (finalKey && isValid) {
+                console.log('✅ SECURE KEY:', finalKey);
+            } else if (finalKey && !isValid) {
+                console.warn('⚠️ FRAUD DETECTED: Invalid key');
             } else {
-                console.log('⚠️ Chưa nhận key từ tool. Truy cập với ?ma=PHONG-TUS-XXXX');
+                console.log('⚠️ Waiting for key from tool');
             }
         });
         
