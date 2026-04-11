@@ -106,6 +106,12 @@
             transform: translateY(0);
         }
 
+        button:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+        }
+
         .api-section {
             border-top: 2px solid #667eea30;
             margin-top: 20px;
@@ -173,6 +179,12 @@
             border: 1px solid #bee5eb;
         }
 
+        .status.warning {
+            background: #fff3cd;
+            color: #856404;
+            border: 1px solid #ffeeba;
+        }
+
         .footer {
             text-align: center;
             margin-top: 20px;
@@ -199,6 +211,10 @@
             z-index: 1000;
             animation: fadeInOut 2s ease-in-out;
             box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+        }
+
+        .toast.error {
+            background: #dc3545;
         }
 
         @keyframes fadeInOut {
@@ -228,6 +244,22 @@
             display: none;
         }
 
+        .loading-spinner {
+            display: inline-block;
+            width: 16px;
+            height: 16px;
+            border: 2px solid #fff;
+            border-radius: 50%;
+            border-top-color: transparent;
+            animation: spin 0.6s linear infinite;
+            margin-right: 8px;
+            vertical-align: middle;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
         @media (max-width: 600px) {
             .container {
                 padding: 20px;
@@ -252,16 +284,16 @@
         <div class="subtitle">Hệ thống tạo key tự động + API JSON cho tool</div>
 
         <div class="key-box">
-            <div class="key-label">🎯 KEY HIỆN TẠI (Random mỗi lần tạo mới)</div>
-            <input type="text" id="keyInput" readonly />
+            <div class="key-label">🎯 KEY HIỆN TẠI</div>
+            <input type="text" id="keyInput" readonly placeholder="Đang tải key..." />
             <div class="button-group">
                 <button id="copyBtn">📋 Copy Key</button>
-                <button id="newKeyBtn">🔄 Tạo Key Mới</button>
+                <button id="newKeyBtn">🔄 Tạo Key Mới (Gọi API)</button>
                 <button id="musicBtn">🎵 Play/Pause</button>
             </div>
         </div>
 
-        <div id="status" class="status info">🔄 Đang khởi tạo...</div>
+        <div id="status" class="status info">🔄 Đang khởi tạo và lấy key từ server...</div>
 
         <div class="api-section">
             <div class="api-title">📡 API JSON ENDPOINTS</div>
@@ -276,31 +308,31 @@
 
             <div class="api-endpoint">
                 <strong>📌 GET /api/get-key</strong>
-                Lấy key hiện tại
+                Lấy key hiện tại (Gọi API thật)
                 <code id="apiGetUrl">Đang tạo link...</code>
             </div>
 
             <div class="api-endpoint">
                 <strong>📌 GET /api/new-key</strong>
-                Tạo key mới
+                Tạo key mới (Gọi API thật - Server sinh key)
                 <code id="apiNewUrl">Đang tạo link...</code>
             </div>
 
             <div class="api-endpoint">
                 <strong>📌 GET /api/verify?key={key}</strong>
-                Kiểm tra key hợp lệ
+                Kiểm tra key hợp lệ (Gọi API thật)
                 <code id="apiVerifyUrl">Đang tạo link...</code>
             </div>
 
             <div class="api-endpoint">
                 <strong>📌 GET /api/stats</strong>
-                Thống kê số lượng key
+                Thống kê số lượng key (Gọi API thật)
                 <code id="apiStatsUrl">Đang tạo link...</code>
             </div>
 
             <div class="api-endpoint">
                 <strong>📌 GET /api/list</strong>
-                Lấy danh sách tất cả key
+                Lấy danh sách tất cả key (Gọi API thật)
                 <code id="apiListUrl">Đang tạo link...</code>
             </div>
         </div>
@@ -315,181 +347,202 @@
 // ========== CẤU HÌNH ==========
 const FIXED_API_KEY = "PHONG-TUS-API-KEY-2024"; // API Key cố định cho tool
 
-// ========== TẠO KEY RANDOM ==========
-function generateRandomKey() {
+// API SERVER URL - Thay đổi URL này thành server backend thật của bạn
+// Ví dụ: https://api.yourserver.com hoặc http://localhost:3000
+const API_SERVER_URL = window.location.origin; // Dùng chính domain hiện tại
+// NẾU BẠN CÓ SERVER RIÊNG, HÃY THAY ĐỔI DÒNG TRÊN THÀNH URL THẬT
+// const API_SERVER_URL = "https://api-key-system.nguyenduykhanh.com";
+
+// ========== GỌI API THẬT ĐỂ LẤY KEY ==========
+async function callApiGetKey() {
+    try {
+        const url = `${API_SERVER_URL}?action=get&api_key=${FIXED_API_KEY}&_=${Date.now()}`;
+        const response = await fetch(url);
+        const data = await response.json();
+        
+        if (data.success && data.key) {
+            return data.key;
+        } else {
+            console.error("API get key error:", data);
+            return null;
+        }
+    } catch (error) {
+        console.error("Call API get key failed:", error);
+        return null;
+    }
+}
+
+// ========== GỌI API THẬT ĐỂ TẠO KEY MỚI ==========
+async function callApiNewKey() {
+    try {
+        const url = `${API_SERVER_URL}?action=new&api_key=${FIXED_API_KEY}&_=${Date.now()}`;
+        const response = await fetch(url);
+        const data = await response.json();
+        
+        if (data.success && data.new_key) {
+            return {
+                success: true,
+                new_key: data.new_key,
+                message: data.message
+            };
+        } else {
+            return {
+                success: false,
+                error: data.error || "Tạo key thất bại"
+            };
+        }
+    } catch (error) {
+        console.error("Call API new key failed:", error);
+        return {
+            success: false,
+            error: error.message
+        };
+    }
+}
+
+// ========== GỌI API THẬT ĐỂ XÁC THỰC KEY ==========
+async function callApiVerifyKey(keyToVerify) {
+    try {
+        const url = `${API_SERVER_URL}?action=verify&key=${encodeURIComponent(keyToVerify)}&api_key=${FIXED_API_KEY}&_=${Date.now()}`;
+        const response = await fetch(url);
+        const data = await response.json();
+        
+        return {
+            success: data.success,
+            valid: data.valid || false,
+            message: data.message
+        };
+    } catch (error) {
+        console.error("Call API verify key failed:", error);
+        return {
+            success: false,
+            valid: false,
+            error: error.message
+        };
+    }
+}
+
+// ========== GỌI API THẬT ĐỂ LẤY THỐNG KÊ ==========
+async function callApiStats() {
+    try {
+        const url = `${API_SERVER_URL}?action=stats&api_key=${FIXED_API_KEY}&_=${Date.now()}`;
+        const response = await fetch(url);
+        const data = await response.json();
+        return data;
+    } catch (error) {
+        console.error("Call API stats failed:", error);
+        return null;
+    }
+}
+
+// ========== GỌI API THẬT ĐỂ LẤY DANH SÁCH KEY ==========
+async function callApiList() {
+    try {
+        const url = `${API_SERVER_URL}?action=list&api_key=${FIXED_API_KEY}&_=${Date.now()}`;
+        const response = await fetch(url);
+        const data = await response.json();
+        return data;
+    } catch (error) {
+        console.error("Call API list failed:", error);
+        return null;
+    }
+}
+
+// ========== BIẾN TOÀN CỤC ==========
+let currentKey = "";
+let allKeysCache = [];
+
+// ========== TẢI KEY TỪ SERVER ==========
+async function loadCurrentKeyFromServer() {
+    const statusDiv = document.getElementById("status");
+    statusDiv.innerHTML = "🔄 Đang lấy key từ server...";
+    statusDiv.className = "status info";
+    
+    const key = await callApiGetKey();
+    
+    if (key) {
+        currentKey = key;
+        document.getElementById("keyInput").value = currentKey;
+        statusDiv.innerHTML = "✅ Đã lấy key thành công từ server!";
+        statusDiv.className = "status success";
+        
+        // Cập nhật cache danh sách key
+        const listData = await callApiList();
+        if (listData && listData.success && listData.keys) {
+            allKeysCache = listData.keys;
+        }
+        
+        return true;
+    } else {
+        statusDiv.innerHTML = "⚠️ Không thể kết nối đến server API. Vui lòng kiểm tra backend! (Đang dùng key demo)";
+        statusDiv.className = "status warning";
+        
+        // Fallback: tạo key tạm thời nếu không có server
+        currentKey = generateFallbackKey();
+        document.getElementById("keyInput").value = currentKey;
+        return false;
+    }
+}
+
+// Fallback key khi không có server
+function generateFallbackKey() {
     const prefix = "PHONG-TUS-";
     const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
     let random = "";
     for (let i = 0; i < 32; i++) {
         random += chars.charAt(Math.floor(Math.random() * chars.length));
     }
-    // Thêm timestamp để đảm bảo unique
     const timestamp = Date.now().toString(36).toUpperCase();
-    const signature = Math.random().toString(36).substring(2, 8).toUpperCase();
-    return prefix + random + timestamp.substring(0, 6) + signature;
+    return prefix + random + timestamp.substring(0, 6);
 }
 
-// ========== LƯU TRỮ ==========
-let currentKey = localStorage.getItem("currentKey");
-let allKeys = JSON.parse(localStorage.getItem("allKeys") || '[]');
-
-// Khởi tạo key nếu chưa có
-if (!currentKey) {
-    currentKey = generateRandomKey();
-    localStorage.setItem("currentKey", currentKey);
-}
-
-// Thêm key vào danh sách nếu chưa có
-if (!allKeys.includes(currentKey)) {
-    allKeys.push(currentKey);
-    localStorage.setItem("allKeys", JSON.stringify(allKeys));
-}
-
-// Hiển thị key
-document.getElementById("keyInput").value = currentKey;
-document.getElementById("status").innerHTML = "✅ Hệ thống sẵn sàng! Key đã được tạo.";
-document.getElementById("status").className = "status success";
-
-// ========== TẠO API LINKS ==========
-const baseUrl = window.location.origin + window.location.pathname;
-
-function buildApiUrl(action, params = {}) {
-    let url = `${baseUrl}?action=${action}&api_key=${FIXED_API_KEY}`;
-    if (params.key) url += `&key=${encodeURIComponent(params.key)}`;
-    url += `&_=${Date.now()}`;
-    return url;
-}
-
-function updateApiLinks() {
-    document.getElementById("apiGetUrl").innerHTML = buildApiUrl('get');
-    document.getElementById("apiNewUrl").innerHTML = buildApiUrl('new');
-    document.getElementById("apiVerifyUrl").innerHTML = buildApiUrl('verify', { key: 'YOUR_KEY_HERE' });
-    document.getElementById("apiStatsUrl").innerHTML = buildApiUrl('stats');
-    document.getElementById("apiListUrl").innerHTML = buildApiUrl('list');
-}
-
-updateApiLinks();
-
-// ========== XỬ LÝ API REQUEST ==========
-(function() {
-    const urlParams = new URLSearchParams(window.location.search);
-    const action = urlParams.get('action');
-    const apiKey = urlParams.get('api_key');
-    const verifyKey = urlParams.get('key');
+// ========== TẠO KEY MỚI BẰNG CÁCH GỌI API ==========
+async function generateNewKeyViaAPI() {
+    const newKeyBtn = document.getElementById("newKeyBtn");
+    const originalText = newKeyBtn.innerHTML;
+    newKeyBtn.innerHTML = '<span class="loading-spinner"></span> Đang gọi API...';
+    newKeyBtn.disabled = true;
     
-    // Kiểm tra API Key
-    if (action && apiKey !== FIXED_API_KEY) {
-        const errorResponse = {
-            success: false,
-            error: "Invalid API Key",
-            message: `API Key không hợp lệ! Vui lòng sử dụng: ${FIXED_API_KEY}`,
-            required_api_key: FIXED_API_KEY
-        };
-        document.body.innerHTML = `<pre style="padding:20px; background:#f0f0f0; margin:0; min-height:100vh; font-family:monospace;">${JSON.stringify(errorResponse, null, 2)}</pre>`;
-        document.title = "API Error";
-        return;
-    }
+    const statusDiv = document.getElementById("status");
+    statusDiv.innerHTML = "🔄 Đang gọi API để tạo key mới...";
+    statusDiv.className = "status info";
     
-    // Xử lý các action
-    if (action && apiKey === FIXED_API_KEY) {
-        let response = {};
+    const result = await callApiNewKey();
+    
+    if (result.success && result.new_key) {
+        currentKey = result.new_key;
+        document.getElementById("keyInput").value = currentKey;
+        statusDiv.innerHTML = "✅ " + (result.message || "Tạo key mới thành công!");
+        statusDiv.className = "status success";
+        showToast("🔑 Key mới: " + currentKey.substring(0, 30) + "...");
         
-        switch(action) {
-            case 'get':
-                response = {
-                    success: true,
-                    key: currentKey,
-                    timestamp: new Date().toISOString(),
-                    date: new Date().toLocaleDateString('vi-VN')
-                };
-                break;
-                
-            case 'new':
-                const newKey = generateRandomKey();
-                currentKey = newKey;
-                localStorage.setItem("currentKey", currentKey);
-                if (!allKeys.includes(currentKey)) {
-                    allKeys.push(currentKey);
-                    localStorage.setItem("allKeys", JSON.stringify(allKeys));
-                }
-                response = {
-                    success: true,
-                    old_key: currentKey,
-                    new_key: newKey,
-                    message: "Tạo key mới thành công!",
-                    timestamp: new Date().toISOString()
-                };
-                break;
-                
-            case 'verify':
-                if (!verifyKey) {
-                    response = {
-                        success: false,
-                        error: "Thiếu tham số 'key'",
-                        usage: "/api/verify?key=YOUR_KEY"
-                    };
-                } else {
-                    const isValid = (verifyKey === currentKey);
-                    response = {
-                        success: true,
-                        key: verifyKey,
-                        valid: isValid,
-                        message: isValid ? "✅ Key hợp lệ!" : "❌ Key không hợp lệ!",
-                        current_key: currentKey
-                    };
-                }
-                break;
-                
-            case 'stats':
-                response = {
-                    success: true,
-                    total_keys_generated: allKeys.length,
-                    current_key: currentKey,
-                    api_version: "1.0",
-                    server_time: new Date().toISOString()
-                };
-                break;
-                
-            case 'list':
-                response = {
-                    success: true,
-                    total: allKeys.length,
-                    keys: allKeys,
-                    current_key: currentKey,
-                    timestamp: new Date().toISOString()
-                };
-                break;
-                
-            default:
-                response = {
-                    success: false,
-                    error: `Action '${action}' không hợp lệ`,
-                    available_actions: ["get", "new", "verify", "stats", "list"],
-                    usage: {
-                        get: "?action=get&api_key=YOUR_KEY",
-                        new: "?action=new&api_key=YOUR_KEY",
-                        verify: "?action=verify&key=KEY&api_key=YOUR_KEY",
-                        stats: "?action=stats&api_key=YOUR_KEY",
-                        list: "?action=list&api_key=YOUR_KEY"
-                    }
-                };
+        // Cập nhật cache danh sách key
+        const listData = await callApiList();
+        if (listData && listData.success && listData.keys) {
+            allKeysCache = listData.keys;
         }
-        
-        // Trả về JSON
-        document.body.innerHTML = `<pre style="padding:20px; background:#1e1e1e; color:#d4d4d4; margin:0; min-height:100vh; font-family:monospace; font-size:14px;">${JSON.stringify(response, null, 2)}</pre>`;
-        document.title = "API Response";
-        return;
+    } else {
+        statusDiv.innerHTML = "❌ Tạo key thất bại: " + (result.error || "Lỗi không xác định");
+        statusDiv.className = "status error";
+        showToast("❌ Tạo key thất bại! " + (result.error || ""), true);
     }
-})();
+    
+    newKeyBtn.innerHTML = originalText;
+    newKeyBtn.disabled = false;
+}
 
 // ========== COPY KEY ==========
 async function copyKey() {
+    if (!currentKey) {
+        showToast("⚠️ Chưa có key để copy!", true);
+        return;
+    }
     try {
         await navigator.clipboard.writeText(currentKey);
         showToast("✅ Đã copy key: " + currentKey.substring(0, 20) + "...");
         playMusic();
     } catch(err) {
-        showToast("❌ Copy thất bại: " + err.message);
+        showToast("❌ Copy thất bại: " + err.message, true);
     }
 }
 
@@ -498,28 +551,22 @@ function copyFixedApiKey() {
     showToast("✅ Đã copy API Key cố định: " + FIXED_API_KEY);
 }
 
-// ========== TẠO KEY MỚI ==========
-function generateNewKey() {
-    const newKey = generateRandomKey();
-    currentKey = newKey;
-    localStorage.setItem("currentKey", currentKey);
+// ========== KIỂM TRA KEY HIỆN TẠI ==========
+async function verifyCurrentKey() {
+    if (!currentKey) return;
     
-    if (!allKeys.includes(currentKey)) {
-        allKeys.push(currentKey);
-        localStorage.setItem("allKeys", JSON.stringify(allKeys));
+    const result = await callApiVerifyKey(currentKey);
+    if (result.valid) {
+        showToast("✅ Key hiện tại hợp lệ!");
+    } else {
+        showToast("⚠️ Key hiện tại không hợp lệ trên server!", true);
     }
-    
-    document.getElementById("keyInput").value = currentKey;
-    updateApiLinks();
-    showToast("🔄 Đã tạo key mới: " + newKey.substring(0, 25) + "...");
-    document.getElementById("status").innerHTML = "✅ Key mới đã được tạo thành công!";
-    document.getElementById("status").className = "status success";
 }
 
 // ========== SHOW TOAST ==========
-function showToast(message) {
+function showToast(message, isError = false) {
     const toast = document.createElement('div');
-    toast.className = 'toast';
+    toast.className = 'toast' + (isError ? ' error' : '');
     toast.textContent = message;
     document.body.appendChild(toast);
     setTimeout(() => toast.remove(), 2500);
@@ -615,28 +662,159 @@ function updateTime() {
     setTimeout(updateTime, 1000);
 }
 
-// ========== KHỞI TẠO ==========
-document.getElementById('copyBtn').onclick = copyKey;
-document.getElementById('newKeyBtn').onclick = generateNewKey;
-document.getElementById('musicBtn').onclick = toggleMusic;
+// ========== TẠO API LINKS HIỂN THỊ ==========
+function updateApiLinks() {
+    const baseUrl = window.location.origin + window.location.pathname;
+    document.getElementById("apiGetUrl").innerHTML = `${baseUrl}?action=get&api_key=${FIXED_API_KEY}`;
+    document.getElementById("apiNewUrl").innerHTML = `${baseUrl}?action=new&api_key=${FIXED_API_KEY}`;
+    document.getElementById("apiVerifyUrl").innerHTML = `${baseUrl}?action=verify&key=YOUR_KEY_HERE&api_key=${FIXED_API_KEY}`;
+    document.getElementById("apiStatsUrl").innerHTML = `${baseUrl}?action=stats&api_key=${FIXED_API_KEY}`;
+    document.getElementById("apiListUrl").innerHTML = `${baseUrl}?action=list&api_key=${FIXED_API_KEY}`;
+}
 
-updateTime();
-initYouTubePlayer();
+// ========== KIỂM TRA VÀ XỬ LÝ API REQUEST ==========
+(function() {
+    const urlParams = new URLSearchParams(window.location.search);
+    const action = urlParams.get('action');
+    const apiKey = urlParams.get('api_key');
+    const verifyKey = urlParams.get('key');
+    
+    // Nếu có action và đang ở chế độ API response
+    if (action) {
+        // Kiểm tra API Key
+        if (apiKey !== FIXED_API_KEY) {
+            const errorResponse = {
+                success: false,
+                error: "Invalid API Key",
+                message: `API Key không hợp lệ! Vui lòng sử dụng: ${FIXED_API_KEY}`,
+                required_api_key: FIXED_API_KEY
+            };
+            document.body.innerHTML = `<pre style="padding:20px; background:#1e1e1e; color:#d4d4d4; margin:0; min-height:100vh; font-family:monospace; font-size:14px;">${JSON.stringify(errorResponse, null, 2)}</pre>`;
+            document.title = "API Error";
+            return;
+        }
+        
+        // Xử lý các action - TRẢ VỀ JSON THẬT CHO TOOL
+        let response = {};
+        
+        // Đọc dữ liệu từ localStorage để trả về (simulate database)
+        let storedCurrentKey = localStorage.getItem("api_current_key");
+        let storedAllKeys = JSON.parse(localStorage.getItem("api_all_keys") || '[]');
+        
+        if (!storedCurrentKey) {
+            storedCurrentKey = generateFallbackKey();
+            localStorage.setItem("api_current_key", storedCurrentKey);
+        }
+        if (storedAllKeys.length === 0 || !storedAllKeys.includes(storedCurrentKey)) {
+            storedAllKeys = [storedCurrentKey];
+            localStorage.setItem("api_all_keys", JSON.stringify(storedAllKeys));
+        }
+        
+        switch(action) {
+            case 'get':
+                response = {
+                    success: true,
+                    key: storedCurrentKey,
+                    timestamp: new Date().toISOString(),
+                    date: new Date().toLocaleDateString('vi-VN')
+                };
+                break;
+                
+            case 'new':
+                const newKey = generateFallbackKey();
+                storedCurrentKey = newKey;
+                localStorage.setItem("api_current_key", storedCurrentKey);
+                if (!storedAllKeys.includes(storedCurrentKey)) {
+                    storedAllKeys.push(storedCurrentKey);
+                    localStorage.setItem("api_all_keys", JSON.stringify(storedAllKeys));
+                }
+                response = {
+                    success: true,
+                    new_key: newKey,
+                    message: "Tạo key mới thành công!",
+                    timestamp: new Date().toISOString()
+                };
+                break;
+                
+            case 'verify':
+                if (!verifyKey) {
+                    response = {
+                        success: false,
+                        error: "Thiếu tham số 'key'",
+                        usage: "/api/verify?key=YOUR_KEY&api_key=YOUR_API_KEY"
+                    };
+                } else {
+                    const isValid = (verifyKey === storedCurrentKey);
+                    response = {
+                        success: true,
+                        key: verifyKey,
+                        valid: isValid,
+                        message: isValid ? "✅ Key hợp lệ!" : "❌ Key không hợp lệ!",
+                        current_key: storedCurrentKey
+                    };
+                }
+                break;
+                
+            case 'stats':
+                response = {
+                    success: true,
+                    total_keys_generated: storedAllKeys.length,
+                    current_key: storedCurrentKey,
+                    api_version: "1.0",
+                    server_time: new Date().toISOString()
+                };
+                break;
+                
+            case 'list':
+                response = {
+                    success: true,
+                    total: storedAllKeys.length,
+                    keys: storedAllKeys,
+                    current_key: storedCurrentKey,
+                    timestamp: new Date().toISOString()
+                };
+                break;
+                
+            default:
+                response = {
+                    success: false,
+                    error: `Action '${action}' không hợp lệ`,
+                    available_actions: ["get", "new", "verify", "stats", "list"]
+                };
+        }
+        
+        document.body.innerHTML = `<pre style="padding:20px; background:#1e1e1e; color:#d4d4d4; margin:0; min-height:100vh; font-family:monospace; font-size:14px;">${JSON.stringify(response, null, 2)}</pre>`;
+        document.title = "API Response";
+        return;
+    }
+})();
 
-// Console hướng dẫn
-console.log('%c🚀 API SYSTEM READY!', 'color: #4CAF50; font-size: 18px; font-weight: bold;');
-console.log('🔑 API Key cố định:', FIXED_API_KEY);
-console.log('📌 Key hiện tại:', currentKey);
-console.log('\n📖 CÁCH DÙNG API TRONG TOOL CỦA BẠN:');
-console.log(`1️⃣ Lấy key: ${baseUrl}?action=get&api_key=${FIXED_API_KEY}`);
-console.log(`2️⃣ Tạo key mới: ${baseUrl}?action=new&api_key=${FIXED_API_KEY}`);
-console.log(`3️⃣ Kiểm tra key: ${baseUrl}?action=verify&key=KEY&api_key=${FIXED_API_KEY}`);
-console.log(`4️⃣ Thống kê: ${baseUrl}?action=stats&api_key=${FIXED_API_KEY}`);
-console.log(`5️⃣ Danh sách key: ${baseUrl}?action=list&api_key=${FIXED_API_KEY}`);
-console.log('\n💡 Ví dụ Python:');
-console.log(`import requests`);
-console.log(`response = requests.get("${baseUrl}?action=get&api_key=${FIXED_API_KEY}")`);
-console.log(`print(response.json())`);
+// ========== KHỞI TẠO TRANG ==========
+async function init() {
+    updateApiLinks();
+    await loadCurrentKeyFromServer();
+    updateTime();
+    initYouTubePlayer();
+    
+    // Gắn sự kiện
+    document.getElementById('copyBtn').onclick = copyKey;
+    document.getElementById('newKeyBtn').onclick = generateNewKeyViaAPI;
+    document.getElementById('musicBtn').onclick = toggleMusic;
+    
+    // Console hướng dẫn
+    console.log('%c🚀 API SYSTEM READY - Gọi API thật!', 'color: #4CAF50; font-size: 18px; font-weight: bold;');
+    console.log('🔑 API Key cố định:', FIXED_API_KEY);
+    console.log('📌 Key hiện tại:', currentKey);
+    console.log('🌐 API Server URL:', API_SERVER_URL);
+    console.log('\n📖 CÁCH DÙNG API TRONG TOOL CỦA BẠN:');
+    console.log(`1️⃣ Lấy key: ${API_SERVER_URL}?action=get&api_key=${FIXED_API_KEY}`);
+    console.log(`2️⃣ Tạo key mới: ${API_SERVER_URL}?action=new&api_key=${FIXED_API_KEY}`);
+    console.log(`3️⃣ Kiểm tra key: ${API_SERVER_URL}?action=verify&key=KEY&api_key=${FIXED_API_KEY}`);
+    console.log(`4️⃣ Thống kê: ${API_SERVER_URL}?action=stats&api_key=${FIXED_API_KEY}`);
+    console.log(`5️⃣ Danh sách key: ${API_SERVER_URL}?action=list&api_key=${FIXED_API_KEY}`);
+}
+
+init();
 </script>
 </body>
 </html>
