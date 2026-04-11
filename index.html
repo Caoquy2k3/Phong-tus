@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no"/>
-    <title>PHONG-TUS | KEY GENERATOR</title>
+    <title>PHONG-TUS | KEY RECEIVER</title>
     <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
     <style>
         * {
@@ -84,6 +84,15 @@
             100% { transform: translateY(100%); }
         }
         
+        @keyframes flicker {
+            0%, 100% { opacity: 1; }
+            95% { opacity: 0.3; }
+            96% { opacity: 0.8; }
+            97% { opacity: 0.2; }
+            98% { opacity: 0.9; }
+            99% { opacity: 0.4; }
+        }
+        
         .cyber-container {
             position: relative;
             z-index: 10;
@@ -117,15 +126,6 @@
             text-align: center;
             letter-spacing: 3px;
             animation: flicker 3s infinite;
-        }
-        
-        @keyframes flicker {
-            0%, 100% { opacity: 1; }
-            95% { opacity: 0.3; }
-            96% { opacity: 0.8; }
-            97% { opacity: 0.2; }
-            98% { opacity: 0.9; }
-            99% { opacity: 0.4; }
         }
         
         .subtitle {
@@ -279,6 +279,109 @@
             color: #00ffff;
         }
         
+        .snow-container {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 5;
+            overflow: hidden;
+        }
+        
+        .cyber-snow {
+            position: absolute;
+            top: -10px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, #00ffff, #8a2be2);
+            opacity: 0.4;
+            pointer-events: none;
+            animation: fall linear infinite;
+            filter: blur(1px);
+        }
+        
+        @keyframes fall {
+            to {
+                transform: translateY(100vh) rotate(360deg);
+            }
+        }
+        
+        .snow-toggle {
+            position: fixed;
+            bottom: 20px;
+            left: 20px;
+            background: rgba(0, 0, 0, 0.6);
+            backdrop-filter: blur(8px);
+            border: 1px solid rgba(0, 255, 255, 0.3);
+            border-radius: 30px;
+            padding: 6px 14px;
+            font-size: 9px;
+            color: #00ffff;
+            cursor: pointer;
+            z-index: 100;
+            font-family: 'Orbitron', monospace;
+            transition: all 0.3s;
+        }
+        
+        .snow-toggle:hover {
+            border-color: #00ffff;
+            box-shadow: 0 0 10px rgba(0, 255, 255, 0.3);
+        }
+        
+        .loading-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.9);
+            backdrop-filter: blur(8px);
+            z-index: 1000;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            opacity: 0;
+            visibility: hidden;
+            transition: all 0.3s;
+        }
+        
+        .loading-overlay.active {
+            opacity: 1;
+            visibility: visible;
+        }
+        
+        .loader {
+            text-align: center;
+        }
+        
+        .loader-text {
+            color: #00ffff;
+            font-size: 14px;
+            letter-spacing: 3px;
+            margin-top: 20px;
+            animation: blink 1s infinite;
+        }
+        
+        .loader-spinner {
+            width: 50px;
+            height: 50px;
+            border: 2px solid rgba(0, 255, 255, 0.2);
+            border-top: 2px solid #00ffff;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        @keyframes blink {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+        
         .toast {
             position: fixed;
             bottom: 30px;
@@ -305,49 +408,6 @@
             background: rgba(255, 0, 0, 0.9);
         }
         
-        /* Reload block overlay */
-        .reload-blocker {
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background: rgba(0, 0, 0, 0.95);
-            backdrop-filter: blur(10px);
-            z-index: 10000;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            flex-direction: column;
-            gap: 20px;
-            animation: fadeIn 0.3s ease;
-        }
-        
-        .reload-blocker.hidden {
-            display: none;
-        }
-        
-        @keyframes fadeIn {
-            from { opacity: 0; }
-            to { opacity: 1; }
-        }
-        
-        .reload-message {
-            color: #ff0000;
-            font-size: 24px;
-            font-weight: bold;
-            text-align: center;
-            font-family: 'Orbitron', monospace;
-            text-shadow: 0 0 10px #ff0000;
-            animation: blink 0.5s infinite;
-        }
-        
-        .reload-sub {
-            color: #00ffff;
-            font-size: 14px;
-            text-align: center;
-        }
-        
         #player {
             display: none;
         }
@@ -357,7 +417,6 @@
             .glitch-text { font-size: 24px; }
             .key-value { font-size: 11px; }
             .cyber-btn { font-size: 11px; padding: 12px; }
-            .reload-message { font-size: 18px; }
         }
     </style>
 </head>
@@ -367,192 +426,181 @@
     <div class="scanline"></div>
     <div id="player"></div>
     
-    <!-- Reload Blocker -->
-    <div id="reloadBlocker" class="reload-blocker hidden">
-        <div class="reload-message">⛔ ACCESS DENIED ⛔</div>
-        <div class="reload-sub">RELOAD IS NOT ALLOWED</div>
-        <div class="reload-sub">Key đã được tạo, vui lòng COPY và sử dụng</div>
+    <div class="snow-container" id="snowContainer"></div>
+    <div class="snow-toggle" id="snowToggle">❄️ SNOW</div>
+    
+    <div class="loading-overlay" id="loadingOverlay">
+        <div class="loader">
+            <div class="loader-spinner"></div>
+            <div class="loader-text">INITIALIZING SECURE SYSTEM...</div>
+        </div>
     </div>
     
     <div class="cyber-container">
         <div class="cyber-card">
             <div class="glitch-text" data-text="PHONG-TUS">PHONG-TUS</div>
-            <div class="subtitle">[ KEY DISTRIBUTION SYSTEM ]</div>
+            <div class="subtitle">[ KEY RECEIVER SYSTEM ]</div>
             
             <div class="key-card">
                 <div class="key-label">┌─ ACCESS KEY ─┐</div>
                 <input type="text" id="keyInput" class="key-value" readonly />
                 <div class="status-badge">
                     <span class="status-dot"></span>
-                    <span id="statusText">KEY GENERATED - DO NOT RELOAD</span>
+                    <span id="statusText">AWAITING KEY FROM TOOL</span>
                 </div>
             </div>
             
             <div class="button-group">
                 <button id="copyButton" class="cyber-btn btn-copy">📋 COPY KEY</button>
+                <button id="musicButton" class="cyber-btn btn-music">🎵 ACTIVATE AUDIO</button>
             </div>
             
             <div class="info-card">
                 <div class="info-line">
-                    <span class="info-label">[ STATUS ]</span>
-                    <span class="info-value" id="sysStatus">ONLINE</span>
+                    <span class="info-label">[ SYSTEM STATUS ]</span>
+                    <span class="info-value" id="systemStatus">ONLINE</span>
                 </div>
                 <div class="info-line">
-                    <span class="info-label">[ TIMESTAMP ]</span>
+                    <span class="info-label">[ KEY SOURCE ]</span>
+                    <span class="info-value">TOOL GENERATED</span>
+                </div>
+                <div class="info-line">
+                    <span class="info-label">[ TIME STAMP ]</span>
                     <span class="info-value" id="timestamp">--:--:--</span>
                 </div>
                 <div class="info-line">
-                    <span class="info-label">[ WARNING ]</span>
-                    <span class="info-value">F5 / RELOAD BLOCKED</span>
+                    <span class="info-label">[ STATUS ]</span>
+                    <span class="info-value" id="keyStatus">NO KEY</span>
                 </div>
             </div>
             
             <div class="cyber-footer">
-                <span>© PHONG-TUS SYSTEM</span> | 
-                <a href="https://t.me/se_meo_bao_an" target="_blank">[ TELEGRAM ]</a>
+                <span>© PHONG-TUS SECURE SYSTEM</span> | 
+                <a href="https://t.me/se_meo_bao_an" target="_blank">[ TELEGRAM NODE ]</a> | 
+                <span id="dateDisplay"></span>
             </div>
         </div>
     </div>
     
     <script>
-    /* ===== PHONG-TUS KEY SYSTEM v6.0 =====
-       - CHẶN HOÀN TOÀN F5 / RELOAD
-       - MỖI LẦN VÀO LINK ĐỀU TẠO KEY MỚI
-       - KHÔNG CHO PHÉP CHỈNH SỬA
-    =========================================*/
+    /* ===== PHONG-TUS KEY RECEIVER SYSTEM v5.0 =====
+       - Web KHÔNG tự tạo key
+       - Chỉ nhận key từ URL parameter ?ma=
+       - Tool là bên duy nhất tạo key
+       - Web chỉ hiển thị + copy key
+    ============================================*/
     
     (function() {
         const PREFIX = "PHONG-TUS-";
-        const RANDOM_LEN = 12;
-        const CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
         
-        // === CHẶN F5 TUYỆT ĐỐI ===
-        let reloadAttempts = 0;
-        const reloadBlocker = document.getElementById('reloadBlocker');
-        
-        function showReloadBlocker() {
-            if (reloadBlocker) {
-                reloadBlocker.classList.remove('hidden');
-                // Tự động ẩn sau 3 giây
-                setTimeout(() => {
-                    reloadBlocker.classList.add('hidden');
-                }, 3000);
+        // === LOADING SCREEN ===
+        const loadingOverlay = document.getElementById('loadingOverlay');
+        function showLoading(show) {
+            if (show) {
+                loadingOverlay.classList.add('active');
+            } else {
+                loadingOverlay.classList.remove('active');
             }
         }
         
-        // Chặn tất cả các phím tắt reload
-        document.addEventListener('keydown', function(e) {
-            // F5
-            if (e.key === 'F5') {
-                e.preventDefault();
-                e.stopPropagation();
-                showReloadBlocker();
-                showToast('⛔ F5 BỊ CHẶN! Không thể reload trang', true);
-                return false;
-            }
-            
-            // Ctrl + R
-            if (e.ctrlKey && e.key === 'r') {
-                e.preventDefault();
-                e.stopPropagation();
-                showReloadBlocker();
-                showToast('⛔ Ctrl+R BỊ CHẶN! Không thể reload trang', true);
-                return false;
-            }
-            
-            // Ctrl + Shift + R
-            if (e.ctrlKey && e.shiftKey && e.key === 'R') {
-                e.preventDefault();
-                e.stopPropagation();
-                showReloadBlocker();
-                showToast('⛔ Hard Reload BỊ CHẶN!', true);
-                return false;
-            }
-            
-            // Ctrl + F5
-            if (e.ctrlKey && e.key === 'F5') {
-                e.preventDefault();
-                e.stopPropagation();
-                showReloadBlocker();
-                showToast('⛔ Ctrl+F5 BỊ CHẶN!', true);
-                return false;
-            }
-            
-            // Cmd + R (Mac)
-            if (e.metaKey && e.key === 'r') {
-                e.preventDefault();
-                e.stopPropagation();
-                showReloadBlocker();
-                showToast('⛔ Cmd+R BỊ CHẶN! Không thể reload trang', true);
-                return false;
-            }
-        });
+        showLoading(true);
+        setTimeout(() => showLoading(false), 1500);
         
-        // Chặn reload bằng chuột (right click -> reload)
-        document.addEventListener('contextmenu', function(e) {
-            // Cho phép right click nhưng không cho reload
-            return true;
-        });
+        // === CYBER SNOW EFFECT ===
+        let snowEnabled = true;
         
-        // Chặn beforeunload (cảnh báo khi cố gắng rời trang)
-        window.addEventListener('beforeunload', function(e) {
-            reloadAttempts++;
-            if (reloadAttempts > 0) {
-                e.preventDefault();
-                e.returnValue = '⚠️ KHÔNG ĐƯỢC RELOAD! Key sẽ mất nếu reload. Bạn có chắc muốn rời trang?';
-                return e.returnValue;
+        function createCyberSnowflake() {
+            const snow = document.createElement('div');
+            snow.classList.add('cyber-snow');
+            const size = Math.random() * 4 + 1.5;
+            snow.style.width = `${size}px`;
+            snow.style.height = `${size}px`;
+            snow.style.left = `${Math.random() * 100}%`;
+            snow.style.animationDuration = `${Math.random() * 6 + 3}s`;
+            snow.style.animationDelay = `${Math.random() * 5}s`;
+            snow.style.opacity = Math.random() * 0.5 + 0.2;
+            return snow;
+        }
+        
+        function initSnow() {
+            const container = document.getElementById('snowContainer');
+            if (!container) return;
+            container.innerHTML = '';
+            const count = window.innerWidth < 768 ? 80 : 150;
+            for (let i = 0; i < count; i++) {
+                container.appendChild(createCyberSnowflake());
             }
-        });
+        }
         
-        // Xử lý khi người dùng cố gắng dùng trình duyệt back/forward
-        window.addEventListener('popstate', function(e) {
-            // Khôi phục lại URL với key hiện tại
+        function removeSnow() {
+            const container = document.getElementById('snowContainer');
+            if (container) container.innerHTML = '';
+        }
+        
+        function toggleSnow() {
+            snowEnabled = !snowEnabled;
+            const toggleBtn = document.getElementById('snowToggle');
+            if (snowEnabled) {
+                initSnow();
+                toggleBtn.innerHTML = '❄️ SNOW';
+                toggleBtn.style.opacity = '1';
+            } else {
+                removeSnow();
+                toggleBtn.innerHTML = '❄️ SNOW OFF';
+                toggleBtn.style.opacity = '0.5';
+            }
+        }
+        
+        // === LẤY KEY TỪ URL PARAMETER 'ma' ===
+        function getKeyFromURL() {
             try {
                 const url = new URL(window.location.href);
-                if (url.searchParams.get('ma') !== finalKey) {
-                    url.searchParams.set('ma', finalKey);
-                    window.history.replaceState({}, '', url);
-                }
-            } catch(e) {}
-            showToast('⚠️ Navigation bị giới hạn', true);
-        });
-        
-        // === XÓA TẤT CẢ KEY CŨ TRONG STORAGE ===
-        try {
-            sessionStorage.removeItem('phongtus_key');
-            localStorage.removeItem('phongtus_key');
-            sessionStorage.removeItem('phongtus_current_key');
-            localStorage.removeItem('phongtus_used_keys');
-        } catch(e) {}
-        
-        // === TẠO KEY NGẪU NHIÊN MỚI ===
-        function generateRandomKey() {
-            let randomPart = "";
-            for (let i = 0; i < RANDOM_LEN; i++) {
-                randomPart += CHARS.charAt(Math.floor(Math.random() * CHARS.length));
+                const key = url.searchParams.get('ma');
+                return key;
+            } catch(e) {
+                return null;
             }
-            return PREFIX + randomPart;
         }
         
-        // Tạo key mới
-        let finalKey = generateRandomKey();
+        // === KIỂM TRA KEY HỢP LỆ ===
+        function isValidKey(key) {
+            if (!key) return false;
+            const pattern = /^PHONG-TUS-[A-Z0-9]{12}$/;
+            return pattern.test(key);
+        }
         
-        // Lưu key tạm thời trong session (chỉ để tham khảo)
-        try {
-            sessionStorage.setItem('phongtus_current_key', finalKey);
-        } catch(e) {}
-        
-        // Cập nhật URL parameter với key mới (KHÔNG RELOAD TRANG)
-        try {
-            const url = new URL(window.location.href);
-            url.searchParams.set('ma', finalKey);
-            window.history.replaceState({}, '', url);
-        } catch(e) {}
-        
-        // Hiển thị key
+        // === HIỂN THỊ KEY TỪ URL ===
+        const keyFromURL = getKeyFromURL();
         const keyInput = document.getElementById('keyInput');
-        if (keyInput) {
-            keyInput.value = finalKey;
+        const statusSpan = document.getElementById('statusText');
+        const keyStatusSpan = document.getElementById('keyStatus');
+        
+        let finalKey = null;
+        
+        if (keyFromURL && isValidKey(keyFromURL)) {
+            finalKey = keyFromURL;
+            if (keyInput) keyInput.value = finalKey;
+            if (statusSpan) statusSpan.textContent = 'KEY RECEIVED FROM TOOL';
+            if (keyStatusSpan) {
+                keyStatusSpan.textContent = 'VALID KEY';
+                keyStatusSpan.style.color = '#00ff00';
+            }
+            
+            // Cập nhật session ID hiển thị
+            const sessionSpan = document.getElementById('sessionId');
+            if (sessionSpan) {
+                const shortId = finalKey.slice(-8);
+                sessionSpan.textContent = `${shortId.slice(0,4)}-${shortId.slice(4,8)}`;
+            }
+        } else {
+            if (keyInput) keyInput.value = '';
+            if (statusSpan) statusSpan.textContent = 'NO KEY - WAITING FOR TOOL';
+            if (keyStatusSpan) {
+                keyStatusSpan.textContent = 'NO KEY';
+                keyStatusSpan.style.color = '#ff0000';
+            }
+            const sessionSpan = document.getElementById('sessionId');
+            if (sessionSpan) sessionSpan.textContent = '----';
         }
         
         // === TOAST NOTIFICATION ===
@@ -572,7 +620,10 @@
         
         // === COPY KEY ===
         async function copyKey() {
-            if (!finalKey) return;
+            if (!finalKey) {
+                showToast('⚠️ NO KEY TO COPY! Please get key from tool first', true);
+                return;
+            }
             
             const copyBtn = document.getElementById('copyButton');
             copyBtn.classList.add('copy-flash');
@@ -590,6 +641,105 @@
                 document.body.removeChild(textarea);
                 showToast('✓ KEY COPIED: ' + finalKey);
             }
+            
+            // Auto play music khi copy key
+            if (!musicPlayed && finalKey) {
+                musicPlayed = true;
+                playMusic();
+                const musicBtn = document.getElementById('musicButton');
+                if (musicBtn) {
+                    musicBtn.innerHTML = '⏸️ AUDIO ACTIVE';
+                    musicBtn.classList.add('music-playing');
+                }
+                showToast('🎵 AUDIO SIGNAL ACTIVATED');
+            } else if (!isPlaying && finalKey) {
+                playMusic();
+            }
+        }
+        
+        // === YOUTUBE MUSIC ===
+        let musicPlayed = false;
+        let ytPlayer = null;
+        let ytReady = false;
+        let isPlaying = false;
+        const YT_VIDEO_ID = 'UKox4YEvLpg';
+        
+        function initYouTube() {
+            if (typeof YT !== 'undefined' && YT.loaded) {
+                createPlayer();
+                return;
+            }
+            if (!document.getElementById('yt-api-script')) {
+                const tag = document.createElement('script');
+                tag.id = 'yt-api-script';
+                tag.src = 'https://www.youtube.com/iframe_api';
+                document.head.appendChild(tag);
+            }
+            window.onYouTubeIframeAPIReady = function() {
+                createPlayer();
+            };
+        }
+        
+        function createPlayer() {
+            if (ytPlayer) return;
+            ytPlayer = new YT.Player('player', {
+                height: '0',
+                width: '0',
+                videoId: YT_VIDEO_ID,
+                playerVars: { autoplay: 0, controls: 0, modestbranding: 1, playsinline: 1 },
+                events: {
+                    onReady: function() {
+                        ytReady = true;
+                        try { ytPlayer.setVolume(40); } catch(e) {}
+                    },
+                    onStateChange: function(event) {
+                        if (event.data === 1) {
+                            isPlaying = true;
+                            const musicBtn = document.getElementById('musicButton');
+                            if (musicBtn) {
+                                musicBtn.innerHTML = '⏸️ AUDIO ACTIVE';
+                                musicBtn.classList.add('music-playing');
+                            }
+                        } else if (event.data === 2) {
+                            isPlaying = false;
+                            const musicBtn = document.getElementById('musicButton');
+                            if (musicBtn) {
+                                musicBtn.innerHTML = '🎵 ACTIVATE AUDIO';
+                                musicBtn.classList.remove('music-playing');
+                            }
+                        }
+                    }
+                }
+            });
+        }
+        
+        function playMusic() {
+            if (!ytReady && !ytPlayer) {
+                initYouTube();
+                setTimeout(() => { if (ytReady && ytPlayer) { ytPlayer.playVideo(); isPlaying = true; } }, 1000);
+            } else if (ytPlayer && ytReady) {
+                ytPlayer.playVideo();
+                isPlaying = true;
+            }
+        }
+        
+        function pauseMusic() {
+            if (ytPlayer && ytReady) ytPlayer.pauseVideo();
+        }
+        
+        function toggleMusic() {
+            if (!finalKey) {
+                showToast('⚠️ No key available', true);
+                return;
+            }
+            if (!ytReady && !ytPlayer) {
+                initYouTube();
+                setTimeout(() => playMusic(), 500);
+            } else if (isPlaying) {
+                pauseMusic();
+            } else {
+                playMusic();
+            }
         }
         
         // === TIME DISPLAY ===
@@ -598,50 +748,55 @@
             const hh = String(now.getHours()).padStart(2, '0');
             const mm = String(now.getMinutes()).padStart(2, '0');
             const ss = String(now.getSeconds()).padStart(2, '0');
+            const d = now.getDate();
+            const m = now.getMonth() + 1;
+            const y = now.getFullYear();
             
             const timestampSpan = document.getElementById('timestamp');
             if (timestampSpan) timestampSpan.textContent = `${hh}:${mm}:${ss}`;
             
+            const dateSpan = document.getElementById('dateDisplay');
+            if (dateSpan) dateSpan.textContent = `${d}/${m}/${y}`;
+            
             setTimeout(updateTime, 1000);
-        }
-        
-        // === CHẶN CHỈNH SỬA INPUT ===
-        if (keyInput) {
-            keyInput.addEventListener('keydown', function(e) {
-                e.preventDefault();
-                return false;
-            });
-            
-            keyInput.addEventListener('paste', function(e) {
-                e.preventDefault();
-                return false;
-            });
-            
-            keyInput.addEventListener('copy', function(e) {
-                // Cho phép copy
-                e.clipboardData.setData('text/plain', finalKey);
-                e.preventDefault();
-            });
         }
         
         // === EVENT LISTENERS ===
         const copyBtn = document.getElementById('copyButton');
         if (copyBtn) copyBtn.addEventListener('click', copyKey);
         
-        // === KHỞI TẠO ===
+        const musicBtn = document.getElementById('musicButton');
+        if (musicBtn) musicBtn.addEventListener('click', toggleMusic);
+        
+        const snowToggle = document.getElementById('snowToggle');
+        if (snowToggle) snowToggle.addEventListener('click', toggleSnow);
+        
+        // === INITIALIZATION ===
         window.addEventListener('load', function() {
             updateTime();
+            initYouTube();
+            initSnow();
             
-            console.log('🔐 PHONG-TUS KEY SYSTEM v6.0');
-            console.log('📌 NEW KEY:', finalKey);
-            console.log('⚠️ F5/RELOAD ĐÃ BỊ CHẶN HOÀN TOÀN');
-            console.log('⚠️ Mỗi lần vào link đều tạo key MỚI');
+            console.log('🔐 PHONG-TUS KEY RECEIVER v5.0');
+            console.log('📡 KEY FROM URL:', finalKey || 'NO KEY');
+            console.log('❄️ SNOW EFFECT:', snowEnabled ? 'ON' : 'OFF');
+            console.log('📌 Web chỉ hiển thị key, không tự tạo key');
+            
+            if (finalKey) {
+                console.log('✅ KEY hợp lệ:', finalKey);
+            } else {
+                console.log('⚠️ Chưa nhận key từ tool. Truy cập với ?ma=PHONG-TUS-XXXX');
+            }
         });
         
-        // Hiển thị thông báo key mới
-        setTimeout(() => {
-            showToast('✨ NEW KEY GENERATED: ' + finalKey);
-        }, 500);
+        // Resize handler for snow
+        let resizeTimeout;
+        window.addEventListener('resize', function() {
+            if (snowEnabled) {
+                clearTimeout(resizeTimeout);
+                resizeTimeout = setTimeout(() => initSnow(), 500);
+            }
+        });
         
     })();
     </script>
