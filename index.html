@@ -1,906 +1,344 @@
 <!DOCTYPE html>
 <html lang="vi">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
-    <title>KeyMarket Pro - Quản lý Key & API JSON</title>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+    <title>Key Ngày Hôm Nay Là</title>
     <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-            font-family: 'Segoe UI', system-ui, -apple-system, 'Poppins', sans-serif;
-        }
-
         body {
-            background: linear-gradient(145deg, #0a0f2a 0%, #0b1525 100%);
-            min-height: 100vh;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #f9f5f3;
+            margin: 0;
             display: flex;
             justify-content: center;
             align-items: center;
-            padding: 24px;
+            min-height: 100vh;
         }
-
-        .app-container {
-            max-width: 1400px;
-            width: 100%;
-            background: rgba(15, 25, 45, 0.65);
-            backdrop-filter: blur(12px);
-            border-radius: 2rem;
-            box-shadow: 0 25px 45px rgba(0,0,0,0.4), 0 0 0 1px rgba(255,255,255,0.05);
-            overflow: hidden;
+        .loading-container {
+            text-align: center;
+            padding: 20px;
+            border: 2px solid #ef8682;
+            border-radius: 10px;
+            box-shadow: 0 0 20px rgba(0,0,0,0.2);
+            background-color: #fff;
+            width: 80vw;
+            max-width: 420px;
         }
-
-        .header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            padding: 1.2rem 2rem;
-            background: rgba(0, 0, 0, 0.4);
-            border-bottom: 1px solid rgba(255,255,255,0.1);
-            flex-wrap: wrap;
-            gap: 12px;
+        h1 { color: #03fcec; font-size: 28px; margin-bottom: 12px; }
+        .key-label { font-size: 14px; color: #888; margin-bottom: 5px; }
+        .key-container { display:flex; flex-direction:column; align-items:center; }
+        input {
+            text-align:center; width:80%; padding:12px; margin-bottom:12px;
+            border:2px solid #fc0303; border-radius:8px; font-size:16px;
+            background:#f8f8f8; font-weight:bold;
         }
-
-        .logo h2 {
-            background: linear-gradient(135deg, #A855F7, #3B82F6);
-            background-clip: text;
-            -webkit-background-clip: text;
-            color: transparent;
-            font-weight: 700;
-        }
-
-        .logo p {
-            font-size: 0.7rem;
-            color: #94a3b8;
-        }
-
-        .user-area {
-            display: flex;
-            align-items: center;
-            gap: 18px;
-            background: rgba(255,255,255,0.05);
-            padding: 6px 18px;
-            border-radius: 60px;
-            flex-wrap: wrap;
-        }
-
-        .user-greeting {
-            color: #e2e8f0;
-            font-weight: 500;
-        }
-
-        .badge-role {
-            font-size: 0.7rem;
-            background: #3b82f6;
-            padding: 4px 12px;
-            border-radius: 30px;
-            color: white;
-        }
-
-        .badge-role.admin {
-            background: #f97316;
-        }
-
+        .button-group { display:flex; gap:10px; justify-content:center; flex-wrap:wrap; }
         button {
-            background: linear-gradient(95deg, #3b82f6, #8b5cf6);
-            border: none;
-            padding: 8px 20px;
-            border-radius: 40px;
-            color: white;
-            font-weight: 600;
-            cursor: pointer;
-            transition: 0.2s;
-            font-size: 0.85rem;
+            background-color:#ef8682; color:#fff; padding:12px 18px; border:none;
+            border-radius:8px; cursor:pointer; font-size:15px; min-width:140px;
         }
-
-        button.outline {
-            background: transparent;
-            border: 1px solid #3b82f6;
-            color: #93c5fd;
-        }
-
-        button.outline:hover {
-            background: #3b82f620;
-            color: white;
-        }
-
-        button.danger {
-            background: linear-gradient(95deg, #ef4444, #b91c1c);
-        }
-
-        button.small {
-            padding: 4px 12px;
-            font-size: 0.7rem;
-        }
-
-        button:active {
-            transform: scale(0.97);
-        }
-
-        .dashboard {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 24px;
-            padding: 28px;
-        }
-
-        .sidebar {
-            flex: 1.2;
-            min-width: 280px;
-            background: rgba(0, 0, 0, 0.3);
-            border-radius: 1.5rem;
-            padding: 20px;
-            backdrop-filter: blur(4px);
-            height: fit-content;
-        }
-
-        .main-content {
-            flex: 3;
-            min-width: 280px;
-        }
-
-        .card {
-            background: rgba(255,255,255,0.05);
-            border-radius: 1.2rem;
-            padding: 20px;
-            margin-bottom: 24px;
-            border: 1px solid rgba(255,255,255,0.1);
-        }
-
-        .card h3 {
-            color: #cbd5e6;
-            margin-bottom: 18px;
-            font-weight: 600;
-            border-left: 4px solid #8b5cf6;
-            padding-left: 14px;
-        }
-
-        .input-group {
-            display: flex;
-            gap: 12px;
-            margin-bottom: 18px;
-            flex-wrap: wrap;
-        }
-
-        input, select, textarea {
-            background: #0f172a;
-            border: 1px solid #334155;
-            padding: 12px 16px;
-            border-radius: 1rem;
-            color: #f1f5f9;
-            font-size: 0.9rem;
-            width: 100%;
-            outline: none;
-        }
-
-        input:focus {
-            border-color: #8b5cf6;
-            box-shadow: 0 0 0 2px #8b5cf640;
-        }
-
-        .key-list {
-            max-height: 450px;
-            overflow-y: auto;
-        }
-
-        .key-item {
-            background: #0f172a80;
-            margin: 8px 0;
-            padding: 12px;
-            border-radius: 14px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            border-left: 3px solid #3b82f6;
-            font-family: monospace;
-            font-size: 0.8rem;
-            word-break: break-all;
-            flex-wrap: wrap;
-            gap: 8px;
-        }
-
-        .key-code {
-            font-weight: bold;
-            color: #a5f3c3;
-        }
-
-        .badge {
-            font-size: 0.7rem;
-            background: #1e293b;
-            padding: 4px 10px;
-            border-radius: 30px;
-        }
-
-        .stats-grid {
-            display: flex;
-            gap: 18px;
-            flex-wrap: wrap;
-            margin-bottom: 20px;
-        }
-
-        .stat-box {
-            background: linear-gradient(145deg, #1e293b, #0f172a);
-            padding: 12px 18px;
-            border-radius: 1rem;
-            flex: 1;
-            text-align: center;
-        }
-
-        .stat-number {
-            font-size: 1.8rem;
-            font-weight: bold;
-            color: #a78bfa;
-        }
-
-        .admin-actions {
-            display: flex;
-            gap: 12px;
-            flex-wrap: wrap;
-            margin-top: 12px;
-        }
-
-        .api-endpoint {
-            background: #0f172a;
-            padding: 12px;
-            border-radius: 12px;
-            margin: 12px 0;
-            font-size: 0.7rem;
-            font-family: monospace;
-            word-break: break-all;
-        }
-
-        .api-endpoint strong {
-            color: #a78bfa;
-            display: block;
-            margin-bottom: 6px;
-        }
-
-        .api-endpoint code {
-            background: #00000040;
-            padding: 6px 8px;
-            border-radius: 8px;
-            display: block;
-            overflow-x: auto;
-        }
-
-        .toast-message {
-            position: fixed;
-            bottom: 24px;
-            left: 50%;
-            transform: translateX(-50%);
-            background: #1e293b;
-            color: white;
-            padding: 12px 28px;
-            border-radius: 50px;
-            backdrop-filter: blur(8px);
-            z-index: 2000;
-            font-weight: 500;
-            animation: fadeUp 0.3s ease;
-            border-left: 4px solid #10b981;
-            box-shadow: 0 10px 20px rgba(0,0,0,0.3);
-        }
-
-        @keyframes fadeUp {
-            from { opacity: 0; bottom: 0; }
-            to { opacity: 1; bottom: 24px; }
-        }
-
-        .empty-msg {
-            color: #6c7a91;
-            text-align: center;
-            padding: 20px;
-        }
-
-        hr {
-            border-color: #334155;
-            margin: 16px 0;
-        }
-
-        footer {
-            text-align: center;
-            padding: 16px;
-            font-size: 0.7rem;
-            color: #5b6e8c;
-            border-top: 1px solid #1e2a3a;
-        }
-
-        .auth-tabs {
-            display: flex;
-            gap: 12px;
-            margin-bottom: 20px;
-            border-bottom: 1px solid #334155;
-        }
-
-        .auth-tab {
-            padding: 8px 20px;
-            cursor: pointer;
-            background: transparent;
-            color: #94a3b8;
-            border-radius: 30px;
-        }
-
-        .auth-tab.active {
-            background: #3b82f6;
-            color: white;
-        }
-
-        @media (max-width: 780px) {
-            .dashboard {
-                flex-direction: column;
-            }
-            .header {
-                flex-direction: column;
-                text-align: center;
-            }
-        }
+        button:hover { background-color:#e9514d; }
+        .footer { text-align:center; margin-top:16px; color:#555; font-size:14px; }
+        #player { display:none; } /* youtube player hidden */
     </style>
 </head>
 <body>
-<div class="app-container" id="appRoot">
-    <div class="header">
-        <div class="logo">
-            <h2>🔑 KeyMarket Pro</h2>
-            <p>Quản lý Key · API JSON · Đăng nhập TK/MK</p>
+    <!-- Hidden container for YouTube player (kept hidden) -->
+    <div id="player"></div>
+
+    <div class="loading-container">
+        <h1>🔑 KEY CỦA BẠN LÀ</h1>
+        <div class="key-label">(Key tự động tạo hoặc lấy từ tham số ma)</div>
+
+        <div class="key-container">
+            <input type="text" id="keyInput" readonly />
+            <div class="button-group">
+                <button id="copyButton">📋 Copy Key</button>
+                <button id="musicButton">▶️ Play Music</button>
+            </div>
         </div>
-        <div class="user-area" id="userAreaHeader"></div>
+
+        <div id="dateDisplay" style="margin-top:10px; font-size:18px; color:#555;"></div>
+        <div class="footer">
+            <b>Copyright By
+                <a href="https://zalo.me/0822771058" style="color:#ef8682; text-decoration:none;">Nguyễn Duy Khánh</a>
+                | Time: <span id="clock"></span>
+            </b>
+        </div>
     </div>
 
-    <div class="dashboard" id="dynamicDashboard"></div>
-    <footer>© 2025 KeyMarket - Hệ thống quản lý key | Admin: admin / admin123</footer>
-</div>
+<script>
+/* ==== Safe key gen + localStorage handling ====
+   - Format: PHONG-TUS- + 16 ký tự [A-Z0-9]
+   - If ?ma present -> show it (only if valid format), else generate unique random key
+   - Saves used keys in localStorage 'usedKeys' (array)
+   - Updates URL with ?ma=KEY using history.replaceState
+   - Exposes small helpers on window.__KEY_UTILS
+=============================================*/
+(function(){
+  const PREFIX = "PHONG-TUS-";
+  const RANDOM_LEN = 16;
+  const CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+
+  function generateRandomKey() {
+    let p = "";
+    for (let i = 0; i < RANDOM_LEN; i++) {
+      p += CHARS.charAt(Math.floor(Math.random() * CHARS.length));
+    }
+    return PREFIX + p;
+  }
+
+  function _loadUsed() {
+    try {
+      const raw = localStorage.getItem("usedKeys");
+      const arr = raw ? JSON.parse(raw) : [];
+      return Array.isArray(arr) ? arr : [];
+    } catch (e) {
+      return [];
+    }
+  }
+
+  function _saveUsed(arr) {
+    try {
+      localStorage.setItem("usedKeys", JSON.stringify(arr));
+    } catch (e) {
+      // ignore quota errors
+    }
+  }
+
+  function markKeyAsUsed(key){
+    if (!key) return;
+    const used = _loadUsed();
+    if (!used.includes(key)) {
+      used.push(key);
+      _saveUsed(used);
+    }
+  }
+
+  function isKeyUsed(key){
+    if (!key) return false;
+    const used = _loadUsed();
+    return used.includes(key);
+  }
+
+  function generateUniqueKey(maxAttempts = 100) {
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      const k = generateRandomKey();
+      if (!isKeyUsed(k)) {
+        // mark immediately to reduce duplicate generations
+        markKeyAsUsed(k);
+        return k;
+      }
+    }
+    // fallback if exhausted: generate and mark (rare)
+    const fallback = generateRandomKey();
+    markKeyAsUsed(fallback);
+    return fallback;
+  }
+
+  // expose helpers (non-intrusive)
+  window.__KEY_UTILS = {
+    generateRandomKey,
+    generateUniqueKey,
+    markKeyAsUsed,
+    isKeyUsed
+  };
+
+  function getParam(name) {
+    try {
+      const u = new URL(window.location.href);
+      return u.searchParams.get(name);
+    } catch (e) {
+      const m = window.location.search.match(new RegExp('[?&]' + name + '=([^&]+)'));
+      return m ? decodeURIComponent(m[1]) : null;
+    }
+  }
+
+  // decide final key: prefer valid ?ma param, otherwise generate unique
+  const keyInput = document.getElementById('keyInput');
+  let keyFromUrl = getParam('ma');
+  function isValidFormat(k) {
+    return typeof k === "string" && k.startsWith(PREFIX) && k.length === (PREFIX.length + RANDOM_LEN);
+  }
+
+  let finalKey;
+  if (isValidFormat(keyFromUrl)) {
+    finalKey = keyFromUrl.trim();
+    // mark it used (optional) - comment out if you don't want to mark keys from URL
+    markKeyAsUsed(finalKey);
+  } else {
+    finalKey = generateUniqueKey();
+    // update URL without reload for easy copying / verification
+    try {
+      const newUrl = window.location.origin + window.location.pathname + "?ma=" + encodeURIComponent(finalKey);
+      history.replaceState({}, "", newUrl);
+    } catch (e) { /* ignore */ }
+  }
+
+  // display finalKey
+  if (keyInput) keyInput.value = finalKey;
+
+  // copy helper (used by button)
+  function fallbackCopy(text) {
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.setAttribute("readonly", "");
+    ta.style.position = "absolute";
+    ta.style.left = "-9999px";
+    document.body.appendChild(ta);
+    ta.select();
+    try { document.execCommand("copy"); alert("Copied: " + text); }
+    catch(e) { prompt("Copy the key manually:", text); }
+    document.body.removeChild(ta);
+  }
+
+  function copyText(t){
+    if (!t) return;
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(t).then(()=> {
+        // optional toast: using alert for simplicity
+        // alert("Copied: " + t);
+      }).catch(()=> fallbackCopy(t));
+    } else fallbackCopy(t);
+  }
+
+  // If other code expects handleQueryParams/getkey, keep compatible:
+  window.handleQueryParams = function(){
+    const params = new URLSearchParams(window.location.search);
+    const getkey = params.get('getkey');
+    if (getkey === '1') {
+      const newKey = generateUniqueKey();
+      if (keyInput) keyInput.value = newKey;
+      markKeyAsUsed(newKey);
+      try {
+        const newUrl = window.location.origin + window.location.pathname + "?ma=" + encodeURIComponent(newKey);
+        history.replaceState({}, "", newUrl);
+      } catch(e){}
+    } else {
+      // nothing to do: finalKey already set above
+    }
+  };
+
+  // wire copy button if exists
+  const copyBtn = document.getElementById('copyButton');
+  if (copyBtn) {
+    copyBtn.addEventListener('click', async function(){
+      await copyText(finalKey);
+      // small UI feedback
+      const originalText = copyBtn.textContent;
+      copyBtn.textContent = '✅ Đã copy!';
+      setTimeout(()=> copyBtn.textContent = originalText, 1800);
+      // mark used on copy
+      markKeyAsUsed(finalKey);
+    });
+  }
+
+})();
+</script>
 
 <script>
-    // ==================== CẤU HÌNH ====================
-    const MASTER_API_KEY = "KEYMARKET_API_2025";
-    
-    // ==================== STORAGE ====================
-    const STORAGE_USERS = "keymarket_users";
-    const STORAGE_KEYS = "keymarket_keys";
-    const STORAGE_SESSION = "keymarket_session";
+/* ---------- Time display ---------- */
+function updateTime(){
+    const now = new Date();
+    const hh = String(now.getHours()).padStart(2,'0');
+    const mm = String(now.getMinutes()).padStart(2,'0');
+    const ss = String(now.getSeconds()).padStart(2,'0');
+    const d = now.getDate(), m = now.getMonth()+1, y = now.getFullYear();
+    document.getElementById('clock').textContent = `${hh}:${mm}:${ss}`;
+    document.getElementById('dateDisplay').textContent = `Hôm nay là ngày ${d}/${m}/${y}`;
+    document.title = `Key Ngày ${d}/${m}/${y} Là`;
+    setTimeout(updateTime, 1000);
+}
 
-    // ==================== KHỞI TẠO DỮ LIỆU ====================
-    function initData() {
-        if (!localStorage.getItem(STORAGE_USERS)) {
-            const defaultUsers = [
-                { id: "admin_1", username: "admin", password: "admin123", role: "admin", fullname: "Quản trị viên", email: "admin@keymarket.com", createdAt: new Date().toISOString() }
-            ];
-            localStorage.setItem(STORAGE_USERS, JSON.stringify(defaultUsers));
-        }
-        if (!localStorage.getItem(STORAGE_KEYS)) {
-            const defaultKeys = [
-                { id: "key_1", code: "PRO-9F8D-3A2C-1B7E", status: "active", createdBy: "admin", createdAt: new Date().toISOString(), soldTo: null, price: 199000, usedCount: 0 },
-                { id: "key_2", code: "GAME-X7K9-4M2N-6V3C", status: "active", createdBy: "admin", createdAt: new Date().toISOString(), soldTo: null, price: 299000, usedCount: 0 },
-                { id: "key_3", code: "VIP-5H6J-8K2L-0Q9W", status: "active", createdBy: "admin", createdAt: new Date().toISOString(), soldTo: null, price: 499000, usedCount: 0 }
-            ];
-            localStorage.setItem(STORAGE_KEYS, JSON.stringify(defaultKeys));
-        }
+/* ---------- YouTube Player API integration ---------- */
+/* Sử dụng video ID từ YouTube link bạn gửi: UKox4YEvLpg */
+let ytPlayer;
+let ytPlayerReady = false;
+let ytPlayerInitializing = false;
+let playWhenReady = false;
+const YT_VIDEO_ID = 'UKox4YEvLpg'; // đổi nếu cần
+// tải API
+function initYouTubePlayer(){
+    if (ytPlayerInitializing || typeof YT !== 'undefined' && ytPlayer) return;
+    ytPlayerInitializing = true;
+    // inject YT iframe api script if not present
+    if (!document.getElementById('yt-iframe-api')) {
+        const tag = document.createElement('script');
+        tag.id = 'yt-iframe-api';
+        tag.src = "https://www.youtube.com/iframe_api";
+        document.head.appendChild(tag);
     }
-    initData();
+    // onYouTubeIframeAPIReady sẽ được gọi bởi API khi script load
+}
 
-    // ==================== HELPERS ====================
-    function getUsers() { return JSON.parse(localStorage.getItem(STORAGE_USERS)) || []; }
-    function saveUsers(users) { localStorage.setItem(STORAGE_USERS, JSON.stringify(users)); }
-    function getKeys() { return JSON.parse(localStorage.getItem(STORAGE_KEYS)) || []; }
-    function saveKeys(keys) { localStorage.setItem(STORAGE_KEYS, JSON.stringify(keys)); }
-
-    // ==================== XỬ LÝ API JSON CHO TOOL ====================
-    function handleApiRequest() {
-        const urlParams = new URLSearchParams(window.location.search);
-        const action = urlParams.get('action');
-        const apiKey = urlParams.get('api_key');
-        
-        if (!action) return false;
-        
-        if (apiKey !== MASTER_API_KEY) {
-            sendJsonResponse({ success: false, error: "Invalid API Key", api_key_required: MASTER_API_KEY });
-            return true;
-        }
-        
-        const keys = getKeys();
-        let response = {};
-        
-        switch(action) {
-            case 'get-key':
-                const availableKey = keys.find(k => k.status === 'active' && !k.soldTo);
-                response = availableKey 
-                    ? { success: true, key: availableKey.code, price: availableKey.price, id: availableKey.id }
-                    : { success: false, error: "Không còn key khả dụng" };
-                break;
-                
-            case 'verify':
-                const verifyCode = urlParams.get('key');
-                const keyToVerify = keys.find(k => k.code === verifyCode);
-                if (keyToVerify) {
-                    const isValid = keyToVerify.status === 'active' && !keyToVerify.soldTo;
-                    response = { success: true, valid: isValid, key: verifyCode, message: isValid ? "Key hợp lệ" : "Key đã được bán" };
-                    if (isValid) {
-                        keyToVerify.usedCount = (keyToVerify.usedCount || 0) + 1;
-                        saveKeys(keys);
-                    }
-                } else {
-                    response = { success: false, valid: false, error: "Key không tồn tại" };
+// API callback (YouTube yêu cầu hàm toàn cục)
+function onYouTubeIframeAPIReady(){
+    ytPlayer = new YT.Player('player', {
+        height: '0',
+        width: '0',
+        videoId: YT_VIDEO_ID,
+        playerVars: {
+            autoplay: 0,
+            controls: 0,
+            rel: 0,
+            modestbranding: 1,
+            playsinline: 1
+        },
+        events: {
+            'onReady': function(e){
+                ytPlayerReady = true;
+                ytPlayerInitializing = false;
+                try { ytPlayer.setVolume(60); } catch(e){}
+                if (playWhenReady) {
+                    ytPlayer.seekTo(0);
+                    ytPlayer.playVideo();
+                    playWhenReady = false;
+                    musicButtonUpdateState(true);
                 }
-                break;
-                
-            case 'stats':
-                response = {
-                    success: true,
-                    total_keys: keys.length,
-                    available_keys: keys.filter(k => k.status === 'active' && !k.soldTo).length,
-                    sold_keys: keys.filter(k => k.soldTo !== null).length
-                };
-                break;
-                
-            case 'list':
-                response = { success: true, total: keys.length, keys: keys.map(k => ({ code: k.code, status: k.soldTo ? 'sold' : 'available', price: k.price })) };
-                break;
-                
-            default:
-                response = { success: false, error: `Action '${action}' không hợp lệ`, available_actions: ["get-key", "verify", "stats", "list"] };
-        }
-        
-        sendJsonResponse(response);
-        return true;
-    }
-    
-    function sendJsonResponse(data) {
-        document.body.innerHTML = `<pre style="background:#0f172a; color:#e2e8f0; padding:2rem; margin:0; min-height:100vh; font-family:monospace; font-size:14px;">${JSON.stringify(data, null, 2)}</pre>`;
-        document.title = "API Response";
-    }
-    
-    // ==================== AUTHENTICATION ====================
-    function handleLogin(username, password) {
-        const users = getUsers();
-        const user = users.find(u => u.username === username && u.password === password);
-        if (user) {
-            const { password, ...safeUser } = user;
-            setSession(safeUser);
-            renderApp();
-            showToast(`👋 Chào mừng ${user.fullname} (${user.role === 'admin' ? 'Admin' : 'Người dùng'})`);
-            return true;
-        }
-        showToast("❌ Sai tài khoản hoặc mật khẩu!", true);
-        return false;
-    }
-
-    function handleRegister(username, password, fullname) {
-        const users = getUsers();
-        if (users.find(u => u.username === username)) {
-            showToast("⚠️ Tên đăng nhập đã tồn tại!", true);
-            return false;
-        }
-        if (username.length < 3 || password.length < 3) {
-            showToast("⚠️ Tên đăng nhập/mật khẩu tối thiểu 3 ký tự", true);
-            return false;
-        }
-        const newUser = {
-            id: "u_" + Date.now(),
-            username: username,
-            password: password,
-            role: "user",
-            fullname: fullname || username,
-            email: `${username}@user.com`,
-            createdAt: new Date().toISOString()
-        };
-        users.push(newUser);
-        saveUsers(users);
-        const { password: _, ...safeUser } = newUser;
-        setSession(safeUser);
-        renderApp();
-        showToast("✅ Đăng ký thành công!");
-        return true;
-    }
-
-    function getSession() {
-        const sess = localStorage.getItem(STORAGE_SESSION);
-        if (!sess) return null;
-        try {
-            const data = JSON.parse(sess);
-            if (data.expiry && Date.now() > data.expiry) {
-                localStorage.removeItem(STORAGE_SESSION);
-                return null;
+            },
+            'onStateChange': function(event){
+                if (event.data === 0) {
+                    musicButtonUpdateState(false);
+                }
             }
-            return data.user;
-        } catch(e) { return null; }
-    }
-    
-    function setSession(user) {
-        localStorage.setItem(STORAGE_SESSION, JSON.stringify({ user, expiry: Date.now() + (8 * 3600000) }));
-    }
-    
-    function logout() {
-        localStorage.removeItem(STORAGE_SESSION);
-        renderApp();
-        showToast("👋 Đã đăng xuất!");
-    }
-
-    // ==================== QUẢN LÝ KEY ====================
-    function addNewKey(code, price) {
-        const sessionUser = getSession();
-        if (!sessionUser || sessionUser.role !== 'admin') {
-            showToast("⚠️ Chỉ admin mới được tạo key!", true);
-            return false;
         }
-        if (!code || code.trim() === "") {
-            showToast("❌ Vui lòng nhập mã key", true);
-            return false;
-        }
-        const keys = getKeys();
-        if (keys.find(k => k.code === code.trim())) {
-            showToast("❌ Mã key đã tồn tại!", true);
-            return false;
-        }
-        const newKey = {
-            id: "key_" + Date.now(),
-            code: code.trim(),
-            status: "active",
-            createdBy: sessionUser.username,
-            createdAt: new Date().toISOString(),
-            soldTo: null,
-            price: parseInt(price) || 0,
-            usedCount: 0
-        };
-        keys.push(newKey);
-        saveKeys(keys);
-        showToast(`✅ Đã thêm key: ${code}`);
-        renderApp();
-        return true;
-    }
+    });
+}
 
-    function deleteKey(keyId) {
-        const sessionUser = getSession();
-        if (!sessionUser || sessionUser.role !== 'admin') {
-            showToast("⚠️ Không có quyền", true);
-            return;
-        }
-        let keys = getKeys();
-        const keyExists = keys.find(k => k.id === keyId);
-        if (!keyExists) return;
-        keys = keys.filter(k => k.id !== keyId);
-        saveKeys(keys);
-        showToast(`🗑️ Đã xóa key: ${keyExists.code}`);
-        renderApp();
-    }
+/* ---------- Music toggle button ---------- */
+const musicBtn = document.getElementById('musicButton');
+musicBtn.addEventListener('click', toggleMusic);
 
-    function purchaseKey(keyId) {
-        const sessionUser = getSession();
-        if (!sessionUser) {
-            showToast("🔐 Vui lòng đăng nhập để mua key!", true);
-            return;
-        }
-        if (sessionUser.role === 'admin') {
-            showToast("👑 Admin có thể tạo key mới", true);
-            return;
-        }
-        const keys = getKeys();
-        const keyIndex = keys.findIndex(k => k.id === keyId && k.status === 'active' && !k.soldTo);
-        if (keyIndex === -1) {
-            showToast("❌ Key không khả dụng hoặc đã bán!", true);
-            return;
-        }
-        const key = keys[keyIndex];
-        key.status = "sold";
-        key.soldTo = sessionUser.username;
-        key.soldAt = new Date().toISOString();
-        keys[keyIndex] = key;
-        saveKeys(keys);
-        showToast(`🎉 Mua thành công! Key: ${key.code}`);
-        renderApp();
-    }
-
-    // ==================== RENDER UI ====================
-    function renderAuthScreen() {
-        return `
-            <div style="max-width: 500px; margin: 40px auto;">
-                <div class="card">
-                    <div class="auth-tabs">
-                        <div class="auth-tab active" data-tab="login">🔐 Đăng nhập</div>
-                        <div class="auth-tab" data-tab="register">📝 Đăng ký</div>
-                    </div>
-                    
-                    <div id="loginPanel">
-                        <div class="input-group" style="flex-direction:column;">
-                            <input type="text" id="loginUsername" placeholder="Tên đăng nhập">
-                            <input type="password" id="loginPassword" placeholder="Mật khẩu">
-                            <button id="doLoginBtn">Đăng nhập</button>
-                        </div>
-                    </div>
-                    
-                    <div id="registerPanel" style="display:none;">
-                        <div class="input-group" style="flex-direction:column;">
-                            <input type="text" id="regUsername" placeholder="Tên đăng nhập *">
-                            <input type="password" id="regPassword" placeholder="Mật khẩu *">
-                            <input type="text" id="regFullname" placeholder="Họ tên">
-                            <button id="doRegisterBtn">Đăng ký</button>
-                        </div>
-                    </div>
-                    
-                    <hr>
-                    <div class="empty-msg" style="font-size:12px;">
-                        🔑 Tài khoản Admin: <strong>admin / admin123</strong><br>
-                        📡 API Key cho tool: <strong>${MASTER_API_KEY}</strong><br>
-                        📌 ?action=get-key&api_key=${MASTER_API_KEY}
-                    </div>
-                </div>
-            </div>
-        `;
-    }
-
-    function renderAdminDashboard(keys, user) {
-        const availableKeys = keys.filter(k => k.status === 'active' && !k.soldTo);
-        const soldKeys = keys.filter(k => k.soldTo !== null);
-        const baseUrl = window.location.href.split('?')[0];
-        
-        return `
-            <div class="sidebar">
-                <div class="card">
-                    <h3>👑 Bảng điều khiển</h3>
-                    <div class="stats-grid">
-                        <div class="stat-box"><div class="stat-number">${keys.length}</div><div>Tổng Key</div></div>
-                        <div class="stat-box"><div class="stat-number">${availableKeys.length}</div><div>Còn trống</div></div>
-                        <div class="stat-box"><div class="stat-number">${soldKeys.length}</div><div>Đã bán</div></div>
-                    </div>
-                    <div class="admin-actions">
-                        <button id="showCreateKeyBtn">➕ Tạo Key mới</button>
-                        <button id="refreshDashboardBtn" class="outline">🔄 Làm mới</button>
-                    </div>
-                </div>
-                
-                <div class="card">
-                    <h3>📡 API JSON cho Tool</h3>
-                    <p style="font-size:12px;">🔑 API Key: <strong>${MASTER_API_KEY}</strong></p>
-                    <div class="api-endpoint">
-                        <strong>📌 Lấy key còn trống</strong>
-                        <code>${baseUrl}?action=get-key&api_key=${MASTER_API_KEY}</code>
-                    </div>
-                    <div class="api-endpoint">
-                        <strong>📌 Verify key</strong>
-                        <code>${baseUrl}?action=verify&api_key=${MASTER_API_KEY}&key=KEY_CODE</code>
-                    </div>
-                    <div class="api-endpoint">
-                        <strong>📌 Thống kê</strong>
-                        <code>${baseUrl}?action=stats&api_key=${MASTER_API_KEY}</code>
-                    </div>
-                    <div class="api-endpoint">
-                        <strong>📌 Danh sách key</strong>
-                        <code>${baseUrl}?action=list&api_key=${MASTER_API_KEY}</code>
-                    </div>
-                </div>
-                
-                <div class="card">
-                    <h3>👥 Quản lý người dùng</h3>
-                    <div id="userList" style="max-height:200px; overflow-y:auto;">
-                        ${renderUserList()}
-                    </div>
-                </div>
-            </div>
-            <div class="main-content">
-                <div class="card">
-                    <h3>📦 Danh sách Key</h3>
-                    <div id="keyListContainer" class="key-list">
-                        ${renderKeyList(keys)}
-                    </div>
-                </div>
-            </div>
-        `;
-    }
-
-    function renderUserDashboard(keys, user) {
-        const unsoldKeys = keys.filter(k => k.status === 'active' && !k.soldTo);
-        const myPurchasedKeys = keys.filter(k => k.soldTo === user.username);
-        const baseUrl = window.location.href.split('?')[0];
-        
-        return `
-            <div class="sidebar">
-                <div class="card">
-                    <h3>👤 Thông tin</h3>
-                    <p><strong>Họ tên:</strong> ${user.fullname}</p>
-                    <p><strong>Username:</strong> ${user.username}</p>
-                    <p><strong>Email:</strong> ${user.email || '---'}</p>
-                    <p><strong>Vai trò:</strong> Thành viên</p>
-                    <hr>
-                    <p>🔑 Key đã mua: ${myPurchasedKeys.length}</p>
-                    <button id="userRefreshBtn" class="outline">🔄 Làm mới</button>
-                </div>
-                <div class="card">
-                    <h3>📡 API cho Tool</h3>
-                    <p style="font-size:12px;">API Key: <strong>${MASTER_API_KEY}</strong></p>
-                    <div class="api-endpoint">
-                        <strong>Lấy key</strong>
-                        <code>${baseUrl}?action=get-key&api_key=${MASTER_API_KEY}</code>
-                    </div>
-                </div>
-            </div>
-            <div class="main-content">
-                <div class="card">
-                    <h3>🛒 Cửa hàng Key</h3>
-                    <div id="availableKeysStore" class="key-list">
-                        ${unsoldKeys.length === 0 ? '<div class="empty-msg">✨ Hiện chưa có key nào bán!</div>' : 
-                            unsoldKeys.map(k => `
-                                <div class="key-item">
-                                    <div><span class="key-code">🔐 ${k.code}</span><br><span class="badge">💰 ${k.price?.toLocaleString()}đ</span></div>
-                                    <button class="buy-key-btn" data-id="${k.id}">Mua ngay</button>
-                                </div>
-                            `).join('')
-                        }
-                    </div>
-                </div>
-                <div class="card">
-                    <h3>📋 Key của tôi</h3>
-                    <div id="myKeysList" class="key-list">
-                        ${myPurchasedKeys.length === 0 ? '<div class="empty-msg">Bạn chưa mua key nào.</div>' :
-                            myPurchasedKeys.map(k => `
-                                <div class="key-item">
-                                    <span class="key-code">${k.code}</span>
-                                    <span class="badge">Mua: ${new Date(k.soldAt).toLocaleDateString('vi-VN')}</span>
-                                </div>
-                            `).join('')
-                        }
-                    </div>
-                </div>
-            </div>
-        `;
-    }
-
-    function renderUserList() {
-        const users = getUsers();
-        if (users.length === 0) return '<div class="empty-msg">Chưa có người dùng</div>';
-        return users.map(u => `
-            <div style="background:#0f172a; margin:6px 0; padding:8px 12px; border-radius:10px; display:flex; justify-content:space-between; align-items:center;">
-                <div><strong>${u.username}</strong><br><span style="font-size:10px;">${u.role}</span></div>
-                ${u.role !== 'admin' ? `<button class="small delete-user-btn" data-id="${u.id}" style="background:#ef4444;">🗑️ Xóa</button>` : '<span class="badge">Admin</span>'}
-            </div>
-        `).join('');
-    }
-
-    function renderKeyList(keys) {
-        if (keys.length === 0) return '<div class="empty-msg">Chưa có key nào</div>';
-        return keys.map(k => `
-            <div class="key-item">
-                <div style="flex:2">
-                    <div class="key-code">${k.code}</div>
-                    <div style="font-size:10px;">💰 ${k.price?.toLocaleString()}đ | ${k.soldTo ? `Đã bán cho ${k.soldTo}` : 'Còn hàng'}</div>
-                </div>
-                <div>
-                    <button class="delete-key-btn" data-id="${k.id}" style="background:#ef4444; padding:6px 12px;">🗑️ Xóa</button>
-                </div>
-            </div>
-        `).join('');
-    }
-
-    function deleteUser(userId) {
-        const sessionUser = getSession();
-        if (!sessionUser || sessionUser.role !== 'admin') {
-            showToast("⚠️ Không có quyền", true);
-            return;
-        }
-        let users = getUsers();
-        const userToDelete = users.find(u => u.id === userId);
-        if (userToDelete && userToDelete.role === 'admin') {
-            showToast("⚠️ Không thể xóa admin", true);
-            return;
-        }
-        users = users.filter(u => u.id !== userId);
-        saveUsers(users);
-        showToast(`🗑️ Đã xóa người dùng`);
-        renderApp();
-    }
-
-    function showCreateKeyModal() {
-        const modalDiv = document.createElement('div');
-        modalDiv.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.8);display:flex;align-items:center;justify-content:center;z-index:3000;';
-        modalDiv.innerHTML = `
-            <div style="background:#0f172a; border-radius:28px; max-width:400px; width:90%; padding:28px;">
-                <h3 style="color:white;">➕ Tạo key mới</h3>
-                <input type="text" id="newKeyCode" placeholder="Mã key" style="margin:12px 0;">
-                <input type="number" id="newKeyPrice" placeholder="Giá bán" value="199000">
-                <div style="display:flex; gap:12px; margin-top:20px;">
-                    <button id="confirmCreateKeyBtn">Tạo</button>
-                    <button id="cancelModalBtn" class="outline">Hủy</button>
-                </div>
-            </div>
-        `;
-        document.body.appendChild(modalDiv);
-        modalDiv.querySelector('#confirmCreateKeyBtn').onclick = () => {
-            const code = modalDiv.querySelector('#newKeyCode').value.trim();
-            const price = modalDiv.querySelector('#newKeyPrice').value;
-            if (code) { addNewKey(code, price); modalDiv.remove(); }
-            else showToast("Nhập mã key", true);
-        };
-        modalDiv.querySelector('#cancelModalBtn').onclick = () => modalDiv.remove();
-    }
-
-    function showToast(msg, isError = false) {
-        const toast = document.createElement('div');
-        toast.className = 'toast-message';
-        toast.style.background = isError ? '#991b1b' : '#1e293b';
-        toast.style.borderLeftColor = isError ? '#ef4444' : '#10b981';
-        toast.innerText = msg;
-        document.body.appendChild(toast);
-        setTimeout(() => toast.remove(), 2800);
-    }
-
-    // ==================== RENDER CHÍNH ====================
-    function renderApp() {
-        if (handleApiRequest()) return;
-        
-        const sessionUser = getSession();
-        const dashboardDiv = document.getElementById('dynamicDashboard');
-        const headerArea = document.getElementById('userAreaHeader');
-
-        if (!sessionUser) {
-            headerArea.innerHTML = `<span class="user-greeting">👋 Chưa đăng nhập</span>`;
-            dashboardDiv.innerHTML = renderAuthScreen();
-            
-            setTimeout(() => {
-                const loginPanel = document.getElementById('loginPanel');
-                const registerPanel = document.getElementById('registerPanel');
-                const tabs = document.querySelectorAll('.auth-tab');
-                tabs.forEach(tab => {
-                    tab.onclick = () => {
-                        tabs.forEach(t => t.classList.remove('active'));
-                        tab.classList.add('active');
-                        if (tab.innerText.includes('Đăng nhập')) {
-                            loginPanel.style.display = 'block';
-                            registerPanel.style.display = 'none';
-                        } else {
-                            loginPanel.style.display = 'none';
-                            registerPanel.style.display = 'block';
-                        }
-                    };
-                });
-                
-                document.getElementById('doLoginBtn')?.addEventListener('click', () => {
-                    const user = document.getElementById('loginUsername').value;
-                    const pwd = document.getElementById('loginPassword').value;
-                    handleLogin(user, pwd);
-                });
-                document.getElementById('doRegisterBtn')?.addEventListener('click', () => {
-                    const user = document.getElementById('regUsername').value;
-                    const pwd = document.getElementById('regPassword').value;
-                    const full = document.getElementById('regFullname').value;
-                    handleRegister(user, pwd, full);
-                });
-            }, 50);
-            return;
-        }
-
-        const user = sessionUser;
-        const allKeys = getKeys();
-        
-        headerArea.innerHTML = `
-            <span class="user-greeting">👋 ${user.fullname}</span>
-            <span class="badge-role ${user.role === 'admin' ? 'admin' : ''}">${user.role === 'admin' ? 'Quản trị viên' : 'Thành viên'}</span>
-            <button id="logoutHeaderBtn" class="outline">🚪 Đăng xuất</button>
-        `;
-
-        if (user.role === 'admin') {
-            dashboardDiv.innerHTML = renderAdminDashboard(allKeys, user);
-            setTimeout(() => {
-                document.getElementById('showCreateKeyBtn')?.addEventListener('click', showCreateKeyModal);
-                document.getElementById('refreshDashboardBtn')?.addEventListener('click', () => renderApp());
-                document.querySelectorAll('.delete-key-btn').forEach(btn => {
-                    btn.addEventListener('click', () => { if (confirm('Xóa key này?')) deleteKey(btn.dataset.id); });
-                });
-                document.querySelectorAll('.delete-user-btn').forEach(btn => {
-                    btn.addEventListener('click', () => { if (confirm('Xóa người dùng này?')) deleteUser(btn.dataset.id); });
-                });
-            }, 50);
+function toggleMusic(){
+    if (typeof ytPlayer !== 'undefined' && ytPlayerReady) {
+        const state = ytPlayer.getPlayerState();
+        if (state === 1) {
+            ytPlayer.pauseVideo(); musicButtonUpdateState(false);
         } else {
-            dashboardDiv.innerHTML = renderUserDashboard(allKeys, user);
-            setTimeout(() => {
-                document.querySelectorAll('.buy-key-btn').forEach(btn => {
-                    btn.addEventListener('click', () => purchaseKey(btn.dataset.id));
-                });
-                document.getElementById('userRefreshBtn')?.addEventListener('click', () => renderApp());
-            }, 50);
+            ytPlayer.playVideo(); musicButtonUpdateState(true);
         }
-
-        document.getElementById('logoutHeaderBtn')?.addEventListener('click', logout);
+    } else {
+        initYouTubePlayer();
+        playWhenReady = true;
+        musicButtonUpdateState(true, '...Loading');
     }
+}
 
-    renderApp();
+function musicButtonUpdateState(isPlaying, overrideText){
+    if (overrideText) {
+        musicBtn.textContent = '⏳ ' + overrideText;
+        return;
+    }
+    musicBtn.textContent = isPlaying ? '⏸️ Pause Music' : '▶️ Play Music';
+}
+
+/* ---------- Init ---------- */
+window.addEventListener('load', function(){
+    updateTime();
+    // keep compatibility: if legacy code calls handleQueryParams, it exists
+    if (typeof handleQueryParams === 'function') handleQueryParams();
+    initYouTubePlayer(); // khởi động sớm (không autoplay) để sẵn sàng khi người dùng copy
+});
 </script>
 </body>
 </html>
