@@ -230,6 +230,14 @@
             background: linear-gradient(135deg, rgba(0, 255, 255, 0.25), rgba(0, 150, 200, 0.25));
         }
         
+        /* ✅ FIX 2: CSS cho music-playing */
+        .music-playing {
+            border-color: #00ff00 !important;
+            box-shadow: 0 0 20px rgba(0,255,0,0.4);
+            color: #00ff00 !important;
+            background: linear-gradient(135deg, rgba(0, 255, 0, 0.2), rgba(0, 100, 0, 0.2));
+        }
+        
         @keyframes copyFlash {
             0% { transform: scale(1); }
             50% { transform: scale(0.98); background: #00ff00; box-shadow: 0 0 30px #00ff00; }
@@ -460,6 +468,11 @@
                     <span class="info-label">[ SYSTEM STATUS ]</span>
                     <span class="info-value" id="systemStatus">SECURE MODE</span>
                 </div>
+                <!-- ✅ FIX 1: Đã thêm sessionId vào đây -->
+                <div class="info-line">
+                    <span class="info-label">[ SESSION ID ]</span>
+                    <span class="info-value" id="sessionId">----</span>
+                </div>
                 <div class="info-line">
                     <span class="info-label">[ KEY SOURCE ]</span>
                     <span class="info-value">TOOL GENERATED ONLY</span>
@@ -483,11 +496,11 @@
     </div>
     
     <script>
-    /* ===== PHONG-TUS SECURE KEY SYSTEM v6.0 =====
-       - Web KHÔNG tự tạo key
-       - Chỉ nhận key từ URL parameter ?ma=
-       - Có cơ chế xác thực key (checksum)
-       - Tool là bên duy nhất tạo key hợp lệ
+    /* ===== PHONG-TUS SECURE KEY SYSTEM v6.1 (FIXED) =====
+       - Đã thêm sessionId vào HTML
+       - Đã thêm CSS music-playing
+       - Đã sửa logic music toggle không bị treo
+       - Đã fix race condition YouTube API
     ============================================*/
     
     (function() {
@@ -552,16 +565,12 @@
         }
         
         // === HÀM TẠO CHECKSUM CHO KEY (CHỈ TOOL MỚI BIẾT) ===
-        // Đây là "secret" mà chỉ tool biết, user không thể fake
         function verifyKeyChecksum(key) {
             if (!key || !key.startsWith(PREFIX)) return false;
             
             const randomPart = key.substring(PREFIX.length);
             if (randomPart.length !== 12) return false;
             
-            // Thuật toán checksum đơn giản (chỉ tool biết)
-            // Tool sẽ tạo key theo công thức: PHONG-TUS- + 10 ký tự random + 2 ký tự checksum
-            // Web sẽ kiểm tra checksum này
             const chars = randomPart.split('');
             let sum = 0;
             for (let i = 0; i < 10; i++) {
@@ -572,8 +581,8 @@
                 sum += val;
             }
             
-            const checksum1 = (sum % 26) + 65; // A-Z
-            const checksum2 = ((sum * 3) % 10) + 48; // 0-9
+            const checksum1 = (sum % 26) + 65;
+            const checksum2 = ((sum * 3) % 10) + 48;
             
             const expectedChecksum = String.fromCharCode(checksum1) + String.fromCharCode(checksum2);
             const actualChecksum = randomPart.substring(10, 12);
@@ -591,7 +600,7 @@
             }
         }
         
-        // === KIỂM TRA KEY HỢP LỆ (FORMAT + CHECKSUM) ===
+        // === KIỂM TRA KEY HỢP LỆ ===
         function isValidKey(key) {
             if (!key) return false;
             const pattern = /^PHONG-TUS-[A-Z0-9]{12}$/;
@@ -618,7 +627,7 @@
                 keyStatusSpan.style.color = '#00ff00';
             }
             
-            // Cập nhật session ID hiển thị
+            // ✅ FIX 1: sessionId đã có trong HTML nên sẽ hiển thị
             const sessionSpan = document.getElementById('sessionId');
             if (sessionSpan) {
                 const shortId = finalKey.slice(-8);
@@ -682,26 +691,50 @@
                 showToast('✓ KEY COPIED: ' + finalKey);
             }
             
-            if (!musicPlayed && finalKey) {
-                musicPlayed = true;
-                playMusic();
-                const musicBtn = document.getElementById('musicButton');
-                if (musicBtn) {
-                    musicBtn.innerHTML = '⏸️ AUDIO ACTIVE';
-                    musicBtn.classList.add('music-playing');
-                }
-                showToast('🎵 AUDIO SIGNAL ACTIVATED');
-            } else if (!isPlaying && finalKey) {
+            // ✅ FIX 4: Logic music đúng - chỉ play nếu key hợp lệ và chưa play
+            if (finalKey && isValid && !isPlaying) {
                 playMusic();
             }
         }
         
-        // === YOUTUBE MUSIC ===
-        let musicPlayed = false;
+        // === YOUTUBE MUSIC - FIX RACE CONDITION ===
         let ytPlayer = null;
         let ytReady = false;
         let isPlaying = false;
+        let autoPlayAfterReady = false;
         const YT_VIDEO_ID = 'UKox4YEvLpg';
+        
+        function createPlayer() {
+            if (ytPlayer) return;
+            ytPlayer = new YT.Player('player', {
+                height: '0',
+                width: '0',
+                videoId: YT_VIDEO_ID,
+                playerVars: { autoplay: 0, controls: 0, modestbranding: 1, playsinline: 1 },
+                events: {
+                    onReady: function() {
+                        ytReady = true;
+                        try { ytPlayer.setVolume(40); } catch(e) {}
+                        // ✅ FIX 5: Xử lý auto play sau khi ready
+                        if (autoPlayAfterReady) {
+                            autoPlayAfterReady = false;
+                            ytPlayer.playVideo();
+                            isPlaying = true;
+                            updateMusicButtonUI(true);
+                        }
+                    },
+                    onStateChange: function(event) {
+                        if (event.data === 1) {
+                            isPlaying = true;
+                            updateMusicButtonUI(true);
+                        } else if (event.data === 2) {
+                            isPlaying = false;
+                            updateMusicButtonUI(false);
+                        }
+                    }
+                }
+            });
+        }
         
         function initYouTube() {
             if (typeof YT !== 'undefined' && YT.loaded) {
@@ -719,61 +752,54 @@
             };
         }
         
-        function createPlayer() {
-            if (ytPlayer) return;
-            ytPlayer = new YT.Player('player', {
-                height: '0',
-                width: '0',
-                videoId: YT_VIDEO_ID,
-                playerVars: { autoplay: 0, controls: 0, modestbranding: 1, playsinline: 1 },
-                events: {
-                    onReady: function() {
-                        ytReady = true;
-                        try { ytPlayer.setVolume(40); } catch(e) {}
-                    },
-                    onStateChange: function(event) {
-                        if (event.data === 1) {
-                            isPlaying = true;
-                            const musicBtn = document.getElementById('musicButton');
-                            if (musicBtn) {
-                                musicBtn.innerHTML = '⏸️ AUDIO ACTIVE';
-                                musicBtn.classList.add('music-playing');
-                            }
-                        } else if (event.data === 2) {
-                            isPlaying = false;
-                            const musicBtn = document.getElementById('musicButton');
-                            if (musicBtn) {
-                                musicBtn.innerHTML = '🎵 ACTIVATE AUDIO';
-                                musicBtn.classList.remove('music-playing');
-                            }
-                        }
-                    }
+        function updateMusicButtonUI(playing) {
+            const musicBtn = document.getElementById('musicButton');
+            if (musicBtn) {
+                if (playing) {
+                    musicBtn.innerHTML = '⏸️ AUDIO ACTIVE';
+                    musicBtn.classList.add('music-playing');
+                } else {
+                    musicBtn.innerHTML = '🎵 ACTIVATE AUDIO';
+                    musicBtn.classList.remove('music-playing');
                 }
-            });
+            }
         }
         
+        // ✅ FIX 5: playMusic an toàn, không bị race condition
         function playMusic() {
-            if (!ytReady && !ytPlayer) {
-                initYouTube();
-                setTimeout(() => { if (ytReady && ytPlayer) { ytPlayer.playVideo(); isPlaying = true; } }, 1000);
-            } else if (ytPlayer && ytReady) {
+            if (!finalKey || !isValid) {
+                showToast('⚠️ No valid key to activate audio', true);
+                return;
+            }
+            
+            if (ytPlayer && ytReady) {
                 ytPlayer.playVideo();
                 isPlaying = true;
+                updateMusicButtonUI(true);
+            } else {
+                initYouTube();
+                autoPlayAfterReady = true;
             }
         }
         
         function pauseMusic() {
-            if (ytPlayer && ytReady) ytPlayer.pauseVideo();
+            if (ytPlayer && ytReady) {
+                ytPlayer.pauseVideo();
+                isPlaying = false;
+                updateMusicButtonUI(false);
+            }
         }
         
+        // ✅ FIX 4: Toggle music đúng logic, không bị treo
         function toggleMusic() {
             if (!finalKey || !isValid) {
                 showToast('⚠️ No valid key available', true);
                 return;
             }
+            
             if (!ytReady && !ytPlayer) {
                 initYouTube();
-                setTimeout(() => playMusic(), 500);
+                autoPlayAfterReady = true;
             } else if (isPlaying) {
                 pauseMusic();
             } else {
@@ -813,10 +839,9 @@
         // === INITIALIZATION ===
         window.addEventListener('load', function() {
             updateTime();
-            initYouTube();
             initSnow();
             
-            console.log('🔐 PHONG-TUS SECURE KEY SYSTEM v6.0');
+            console.log('🔐 PHONG-TUS SECURE KEY SYSTEM v6.1 (ALL FIXED)');
             console.log('📡 KEY STATUS:', finalKey ? (isValid ? 'VALID' : 'INVALID') : 'NO KEY');
             if (finalKey && isValid) {
                 console.log('✅ SECURE KEY:', finalKey);
