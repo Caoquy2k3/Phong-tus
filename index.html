@@ -3,8 +3,14 @@
 <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-    <title>Key Ngày Hôm Nay Là</title>
+    <title>Key API System - Nguyễn Duy Khánh</title>
     <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
         body {
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
@@ -13,47 +19,173 @@
             justify-content: center;
             align-items: center;
             min-height: 100vh;
+            padding: 20px;
         }
-        .loading-container {
+
+        .container {
             text-align: center;
             padding: 30px;
             border-radius: 20px;
             box-shadow: 0 20px 60px rgba(0,0,0,0.3);
             background: rgba(255,255,255,0.95);
-            width: 80vw;
-            max-width: 450px;
+            width: 90%;
+            max-width: 650px;
             backdrop-filter: blur(10px);
         }
-        h1 { 
+
+        h1 {
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             -webkit-background-clip: text;
             -webkit-text-fill-color: transparent;
-            font-size: 28px; 
-            margin-bottom: 12px; 
+            font-size: 28px;
+            margin-bottom: 10px;
         }
-        .key-label { font-size: 14px; color: #888; margin-bottom: 5px; }
-        .key-container { display:flex; flex-direction:column; align-items:center; }
+
+        .subtitle {
+            color: #888;
+            font-size: 14px;
+            margin-bottom: 20px;
+        }
+
+        .key-box {
+            background: linear-gradient(135deg, #667eea10 0%, #764ba210 100%);
+            padding: 20px;
+            border-radius: 15px;
+            margin-bottom: 20px;
+            border: 2px solid #667eea30;
+        }
+
+        .key-label {
+            font-size: 14px;
+            color: #667eea;
+            font-weight: bold;
+            margin-bottom: 10px;
+        }
+
         input {
-            text-align:center; width:90%; padding:15px; margin-bottom:15px;
-            border:2px solid #667eea; border-radius:12px; font-size:16px;
-            background:#f8f8f8; font-weight:bold; font-family: monospace;
+            text-align: center;
+            width: 100%;
+            padding: 15px;
+            margin-bottom: 15px;
+            border: 2px solid #667eea;
+            border-radius: 12px;
+            font-size: 14px;
+            background: #f8f8f8;
+            font-weight: bold;
+            font-family: monospace;
             letter-spacing: 1px;
         }
-        .button-group { display:flex; gap:12px; justify-content:center; flex-wrap:wrap; }
+
+        .button-group {
+            display: flex;
+            gap: 12px;
+            justify-content: center;
+            flex-wrap: wrap;
+            margin-bottom: 15px;
+        }
+
         button {
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color:#fff; padding:12px 24px; border:none;
-            border-radius:10px; cursor:pointer; font-size:15px; 
-            min-width:140px; transition: transform 0.2s, box-shadow 0.2s;
+            color: #fff;
+            padding: 12px 24px;
+            border: none;
+            border-radius: 10px;
+            cursor: pointer;
+            font-size: 15px;
+            font-weight: 600;
+            min-width: 140px;
+            transition: transform 0.2s, box-shadow 0.2s;
         }
-        button:hover { 
+
+        button:hover {
             transform: translateY(-2px);
             box-shadow: 0 5px 15px rgba(102,126,234,0.4);
         }
-        button:active { transform: translateY(0); }
-        .footer { text-align:center; margin-top:20px; color:#555; font-size:14px; }
-        .footer a { color:#667eea; text-decoration:none; font-weight:bold; }
-        #player { display:none; }
+
+        button:active {
+            transform: translateY(0);
+        }
+
+        .api-section {
+            border-top: 2px solid #667eea30;
+            margin-top: 20px;
+            padding-top: 20px;
+        }
+
+        .api-title {
+            font-size: 20px;
+            font-weight: bold;
+            color: #667eea;
+            margin-bottom: 15px;
+        }
+
+        .api-endpoint {
+            background: #f5f5f5;
+            padding: 12px;
+            border-radius: 10px;
+            font-family: monospace;
+            font-size: 12px;
+            margin: 10px 0;
+            word-break: break-all;
+            text-align: left;
+            border-left: 4px solid #667eea;
+        }
+
+        .api-endpoint strong {
+            color: #667eea;
+            display: block;
+            margin-bottom: 5px;
+        }
+
+        .api-endpoint code {
+            background: #e0e0e0;
+            padding: 5px;
+            border-radius: 5px;
+            display: block;
+            margin-top: 5px;
+            font-size: 11px;
+            overflow-x: auto;
+        }
+
+        .status {
+            padding: 12px;
+            margin: 15px 0;
+            border-radius: 10px;
+            font-size: 14px;
+            font-weight: 500;
+        }
+
+        .status.success {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+
+        .status.error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+
+        .status.info {
+            background: #d1ecf1;
+            color: #0c5460;
+            border: 1px solid #bee5eb;
+        }
+
+        .footer {
+            text-align: center;
+            margin-top: 20px;
+            color: #555;
+            font-size: 13px;
+        }
+
+        .footer a {
+            color: #667eea;
+            text-decoration: none;
+            font-weight: bold;
+        }
+
         .toast {
             position: fixed;
             bottom: 20px;
@@ -66,328 +198,445 @@
             font-size: 14px;
             z-index: 1000;
             animation: fadeInOut 2s ease-in-out;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.2);
         }
+
         @keyframes fadeInOut {
             0% { opacity: 0; transform: translateX(-50%) translateY(20px); }
             15% { opacity: 1; transform: translateX(-50%) translateY(0); }
             85% { opacity: 1; transform: translateX(-50%) translateY(0); }
             100% { opacity: 0; transform: translateX(-50%) translateY(-20px); }
         }
-        .music-note {
-            display: inline-block;
-            animation: bounce 0.5s ease infinite;
+
+        .api-key-badge {
+            background: linear-gradient(135deg, #667eea20 0%, #764ba220 100%);
+            padding: 10px;
+            border-radius: 8px;
+            margin: 10px 0;
+            font-size: 13px;
         }
-        @keyframes bounce {
-            0%, 100% { transform: translateY(0); }
-            50% { transform: translateY(-5px); }
+
+        .copy-small {
+            background: #667eea;
+            padding: 3px 10px;
+            font-size: 11px;
+            margin-left: 10px;
+            min-width: auto;
+        }
+
+        #player {
+            display: none;
+        }
+
+        @media (max-width: 600px) {
+            .container {
+                padding: 20px;
+            }
+            button {
+                padding: 10px 16px;
+                font-size: 13px;
+                min-width: 120px;
+            }
+            input {
+                font-size: 11px;
+                padding: 12px;
+            }
         }
     </style>
 </head>
 <body>
     <div id="player"></div>
 
-    <div class="loading-container">
-        <h1>🔑 KEY CỦA BẠN LÀ</h1>
-        <div class="key-label">(Key tự động tạo - Copy để nhận key và nghe nhạc)</div>
+    <div class="container">
+        <h1>🔑 KEY API SYSTEM</h1>
+        <div class="subtitle">Hệ thống tạo key tự động + API JSON cho tool</div>
 
-        <div class="key-container">
+        <div class="key-box">
+            <div class="key-label">🎯 KEY HIỆN TẠI (Random mỗi lần tạo mới)</div>
             <input type="text" id="keyInput" readonly />
             <div class="button-group">
-                <button id="copyButton">📋 Copy Key & Nghe Nhạc</button>
-                <button id="musicButton">🎵 Play/Pause</button>
+                <button id="copyBtn">📋 Copy Key</button>
+                <button id="newKeyBtn">🔄 Tạo Key Mới</button>
+                <button id="musicBtn">🎵 Play/Pause</button>
             </div>
         </div>
 
-        <div id="dateDisplay" style="margin-top:10px; font-size:18px; color:#555;"></div>
+        <div id="status" class="status info">🔄 Đang khởi tạo...</div>
+
+        <div class="api-section">
+            <div class="api-title">📡 API JSON ENDPOINTS</div>
+            
+            <div class="api-key-badge">
+                🔑 <strong>API Key cố định (dùng cho tool):</strong> 
+                <code id="fixedApiKey" style="background:#e0e0e0; padding:4px 8px; border-radius:4px;">
+                    PHONG-TUS-API-KEY-2024
+                </code>
+                <button class="copy-small" onclick="copyFixedApiKey()">Copy</button>
+            </div>
+
+            <div class="api-endpoint">
+                <strong>📌 GET /api/get-key</strong>
+                Lấy key hiện tại
+                <code id="apiGetUrl">Đang tạo link...</code>
+            </div>
+
+            <div class="api-endpoint">
+                <strong>📌 GET /api/new-key</strong>
+                Tạo key mới
+                <code id="apiNewUrl">Đang tạo link...</code>
+            </div>
+
+            <div class="api-endpoint">
+                <strong>📌 GET /api/verify?key={key}</strong>
+                Kiểm tra key hợp lệ
+                <code id="apiVerifyUrl">Đang tạo link...</code>
+            </div>
+
+            <div class="api-endpoint">
+                <strong>📌 GET /api/stats</strong>
+                Thống kê số lượng key
+                <code id="apiStatsUrl">Đang tạo link...</code>
+            </div>
+
+            <div class="api-endpoint">
+                <strong>📌 GET /api/list</strong>
+                Lấy danh sách tất cả key
+                <code id="apiListUrl">Đang tạo link...</code>
+            </div>
+        </div>
+
         <div class="footer">
-            <b>Copyright By
-                <a href="https://zalo.me/0822771058" target="_blank">Nguyễn Duy Khánh</a>
-                | Time: <span id="clock"></span>
-            </b>
+            <b>Copyright By <a href="https://zalo.me/0822771058" target="_blank">Nguyễn Duy Khánh</a></b><br>
+            <span>⏰ Time: <span id="clock"></span></span>
         </div>
     </div>
 
 <script>
-/* ==== KEY GEN VỚI HMAC SIGNATURE (ĐỒNG BỘ VỚI TOOL PYTHON) ==== */
-(function(){
-  const PREFIX = "PHONG-TUS-";
-  const RANDOM_LEN = 32; // 32 ký tự random
-  const CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
-  const HMAC_SECRET = "phong_tus_hmac_secret_2024"; // PHẢI GIỐNG TOOL PYTHON
+// ========== CẤU HÌNH ==========
+const FIXED_API_KEY = "PHONG-TUS-API-KEY-2024"; // API Key cố định cho tool
 
-  // Hàm tạo HMAC signature (dùng Web Crypto API)
-  async function generateHMACSignature(message) {
-    const encoder = new TextEncoder();
-    const keyData = encoder.encode(HMAC_SECRET);
-    const messageData = encoder.encode(message);
-    
-    const cryptoKey = await crypto.subtle.importKey(
-        'raw', keyData, { name: 'HMAC', hash: 'MD5' }, false, ['sign']
-    );
-    
-    // MD5 không có sẵn trong Web Crypto, dùng SHA-256 rồi lấy 6 ký tự đầu
-    // Hoặc dùng thư viện bên ngoài, nhưng để đơn giản dùng SHA-256
-    const signature = await crypto.subtle.sign('HMAC', cryptoKey, messageData);
-    const hashArray = Array.from(new Uint8Array(signature));
-    const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
-    return hashHex.substring(0, 6).toUpperCase();
-  }
-
-  function generateRandomString(len) {
-    let result = "";
-    for (let i = 0; i < len; i++) {
-      result += CHARS.charAt(Math.floor(Math.random() * CHARS.length));
+// ========== TẠO KEY RANDOM ==========
+function generateRandomKey() {
+    const prefix = "PHONG-TUS-";
+    const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+    let random = "";
+    for (let i = 0; i < 32; i++) {
+        random += chars.charAt(Math.floor(Math.random() * chars.length));
     }
-    return result;
-  }
+    // Thêm timestamp để đảm bảo unique
+    const timestamp = Date.now().toString(36).toUpperCase();
+    const signature = Math.random().toString(36).substring(2, 8).toUpperCase();
+    return prefix + random + timestamp.substring(0, 6) + signature;
+}
 
-  async function generateKeyWithSignature() {
-    const randomPart = generateRandomString(RANDOM_LEN);
-    const signature = await generateHMACSignature(randomPart);
-    return PREFIX + randomPart + signature;
-  }
+// ========== LƯU TRỮ ==========
+let currentKey = localStorage.getItem("currentKey");
+let allKeys = JSON.parse(localStorage.getItem("allKeys") || '[]');
 
-  function _loadUsed() {
-    try {
-      const raw = localStorage.getItem("usedKeys");
-      const arr = raw ? JSON.parse(raw) : [];
-      return Array.isArray(arr) ? arr : [];
-    } catch (e) {
-      return [];
-    }
-  }
+// Khởi tạo key nếu chưa có
+if (!currentKey) {
+    currentKey = generateRandomKey();
+    localStorage.setItem("currentKey", currentKey);
+}
 
-  function _saveUsed(arr) {
-    try {
-      localStorage.setItem("usedKeys", JSON.stringify(arr));
-    } catch (e) {}
-  }
+// Thêm key vào danh sách nếu chưa có
+if (!allKeys.includes(currentKey)) {
+    allKeys.push(currentKey);
+    localStorage.setItem("allKeys", JSON.stringify(allKeys));
+}
 
-  function markKeyAsUsed(key) {
-    if (!key) return;
-    const used = _loadUsed();
-    if (!used.includes(key)) {
-      used.push(key);
-      _saveUsed(used);
-    }
-  }
+// Hiển thị key
+document.getElementById("keyInput").value = currentKey;
+document.getElementById("status").innerHTML = "✅ Hệ thống sẵn sàng! Key đã được tạo.";
+document.getElementById("status").className = "status success";
 
-  function isKeyUsed(key) {
-    if (!key) return false;
-    return _loadUsed().includes(key);
-  }
+// ========== TẠO API LINKS ==========
+const baseUrl = window.location.origin + window.location.pathname;
 
-  async function generateUniqueKey(maxAttempts = 10) {
-    for (let attempt = 0; attempt < maxAttempts; attempt++) {
-      const k = await generateKeyWithSignature();
-      if (!isKeyUsed(k)) {
-        markKeyAsUsed(k);
-        return k;
-      }
-    }
-    const fallback = await generateKeyWithSignature();
-    markKeyAsUsed(fallback);
-    return fallback;
-  }
+function buildApiUrl(action, params = {}) {
+    let url = `${baseUrl}?action=${action}&api_key=${FIXED_API_KEY}`;
+    if (params.key) url += `&key=${encodeURIComponent(params.key)}`;
+    url += `&_=${Date.now()}`;
+    return url;
+}
 
-  // Hiển thị key
-  const keyInput = document.getElementById('keyInput');
-  let currentKey = null;
+function updateApiLinks() {
+    document.getElementById("apiGetUrl").innerHTML = buildApiUrl('get');
+    document.getElementById("apiNewUrl").innerHTML = buildApiUrl('new');
+    document.getElementById("apiVerifyUrl").innerHTML = buildApiUrl('verify', { key: 'YOUR_KEY_HERE' });
+    document.getElementById("apiStatsUrl").innerHTML = buildApiUrl('stats');
+    document.getElementById("apiListUrl").innerHTML = buildApiUrl('list');
+}
 
-  async function initKey() {
-    // Kiểm tra URL param ?ma
+updateApiLinks();
+
+// ========== XỬ LÝ API REQUEST ==========
+(function() {
     const urlParams = new URLSearchParams(window.location.search);
-    let keyFromUrl = urlParams.get('ma');
+    const action = urlParams.get('action');
+    const apiKey = urlParams.get('api_key');
+    const verifyKey = urlParams.get('key');
     
-    if (keyFromUrl && keyFromUrl.startsWith(PREFIX) && keyFromUrl.length > 20) {
-      currentKey = keyFromUrl;
-      keyInput.value = currentKey;
-    } else {
-      currentKey = await generateUniqueKey();
-      keyInput.value = currentKey;
-      // Update URL
-      try {
-        const newUrl = window.location.origin + window.location.pathname + "?ma=" + encodeURIComponent(currentKey);
-        history.replaceState({}, "", newUrl);
-      } catch(e) {}
+    // Kiểm tra API Key
+    if (action && apiKey !== FIXED_API_KEY) {
+        const errorResponse = {
+            success: false,
+            error: "Invalid API Key",
+            message: `API Key không hợp lệ! Vui lòng sử dụng: ${FIXED_API_KEY}`,
+            required_api_key: FIXED_API_KEY
+        };
+        document.body.innerHTML = `<pre style="padding:20px; background:#f0f0f0; margin:0; min-height:100vh; font-family:monospace;">${JSON.stringify(errorResponse, null, 2)}</pre>`;
+        document.title = "API Error";
+        return;
     }
-  }
-
-  // Copy + phát nhạc
-  async function copyKeyAndPlayMusic() {
-    if (!currentKey) return;
     
-    // Copy key
-    try {
-      await navigator.clipboard.writeText(currentKey);
-      showToast("✅ Đã copy key: " + currentKey.substring(0, 20) + "...");
-      
-      // Phát nhạc ngay khi copy
-      if (typeof playMusicOnCopy === 'function') {
-        playMusicOnCopy();
-      } else {
-        // Fallback: play via YT player
-        if (typeof ytPlayer !== 'undefined' && ytPlayerReady) {
-          ytPlayer.playVideo();
-          musicButtonUpdateState(true);
-          showToast("🎵 Đang phát nhạc nền!");
+    // Xử lý các action
+    if (action && apiKey === FIXED_API_KEY) {
+        let response = {};
+        
+        switch(action) {
+            case 'get':
+                response = {
+                    success: true,
+                    key: currentKey,
+                    timestamp: new Date().toISOString(),
+                    date: new Date().toLocaleDateString('vi-VN')
+                };
+                break;
+                
+            case 'new':
+                const newKey = generateRandomKey();
+                currentKey = newKey;
+                localStorage.setItem("currentKey", currentKey);
+                if (!allKeys.includes(currentKey)) {
+                    allKeys.push(currentKey);
+                    localStorage.setItem("allKeys", JSON.stringify(allKeys));
+                }
+                response = {
+                    success: true,
+                    old_key: currentKey,
+                    new_key: newKey,
+                    message: "Tạo key mới thành công!",
+                    timestamp: new Date().toISOString()
+                };
+                break;
+                
+            case 'verify':
+                if (!verifyKey) {
+                    response = {
+                        success: false,
+                        error: "Thiếu tham số 'key'",
+                        usage: "/api/verify?key=YOUR_KEY"
+                    };
+                } else {
+                    const isValid = (verifyKey === currentKey);
+                    response = {
+                        success: true,
+                        key: verifyKey,
+                        valid: isValid,
+                        message: isValid ? "✅ Key hợp lệ!" : "❌ Key không hợp lệ!",
+                        current_key: currentKey
+                    };
+                }
+                break;
+                
+            case 'stats':
+                response = {
+                    success: true,
+                    total_keys_generated: allKeys.length,
+                    current_key: currentKey,
+                    api_version: "1.0",
+                    server_time: new Date().toISOString()
+                };
+                break;
+                
+            case 'list':
+                response = {
+                    success: true,
+                    total: allKeys.length,
+                    keys: allKeys,
+                    current_key: currentKey,
+                    timestamp: new Date().toISOString()
+                };
+                break;
+                
+            default:
+                response = {
+                    success: false,
+                    error: `Action '${action}' không hợp lệ`,
+                    available_actions: ["get", "new", "verify", "stats", "list"],
+                    usage: {
+                        get: "?action=get&api_key=YOUR_KEY",
+                        new: "?action=new&api_key=YOUR_KEY",
+                        verify: "?action=verify&key=KEY&api_key=YOUR_KEY",
+                        stats: "?action=stats&api_key=YOUR_KEY",
+                        list: "?action=list&api_key=YOUR_KEY"
+                    }
+                };
         }
-      }
-      
-      // Đánh dấu đã dùng
-      markKeyAsUsed(currentKey);
-    } catch(err) {
-      showToast("❌ Copy thất bại: " + err.message);
+        
+        // Trả về JSON
+        document.body.innerHTML = `<pre style="padding:20px; background:#1e1e1e; color:#d4d4d4; margin:0; min-height:100vh; font-family:monospace; font-size:14px;">${JSON.stringify(response, null, 2)}</pre>`;
+        document.title = "API Response";
+        return;
     }
-  }
+})();
 
-  function showToast(message) {
+// ========== COPY KEY ==========
+async function copyKey() {
+    try {
+        await navigator.clipboard.writeText(currentKey);
+        showToast("✅ Đã copy key: " + currentKey.substring(0, 20) + "...");
+        playMusic();
+    } catch(err) {
+        showToast("❌ Copy thất bại: " + err.message);
+    }
+}
+
+function copyFixedApiKey() {
+    navigator.clipboard.writeText(FIXED_API_KEY);
+    showToast("✅ Đã copy API Key cố định: " + FIXED_API_KEY);
+}
+
+// ========== TẠO KEY MỚI ==========
+function generateNewKey() {
+    const newKey = generateRandomKey();
+    currentKey = newKey;
+    localStorage.setItem("currentKey", currentKey);
+    
+    if (!allKeys.includes(currentKey)) {
+        allKeys.push(currentKey);
+        localStorage.setItem("allKeys", JSON.stringify(allKeys));
+    }
+    
+    document.getElementById("keyInput").value = currentKey;
+    updateApiLinks();
+    showToast("🔄 Đã tạo key mới: " + newKey.substring(0, 25) + "...");
+    document.getElementById("status").innerHTML = "✅ Key mới đã được tạo thành công!";
+    document.getElementById("status").className = "status success";
+}
+
+// ========== SHOW TOAST ==========
+function showToast(message) {
     const toast = document.createElement('div');
     toast.className = 'toast';
     toast.textContent = message;
     document.body.appendChild(toast);
-    setTimeout(() => toast.remove(), 2000);
-  }
+    setTimeout(() => toast.remove(), 2500);
+}
 
-  // Copy button
-  const copyBtn = document.getElementById('copyButton');
-  if (copyBtn) {
-    copyBtn.addEventListener('click', copyKeyAndPlayMusic);
-  }
-
-  // Khởi tạo key
-  initKey();
-
-  // Expose utilities
-  window.__KEY_UTILS = { generateKeyWithSignature, markKeyAsUsed, currentKey: () => currentKey };
-})();
-</script>
-
-<script>
-/* ---------- YouTube Player với tự động phát khi copy ---------- */
+// ========== YOUTUBE PLAYER ==========
 let ytPlayer;
 let ytPlayerReady = false;
 let ytPlayerInitializing = false;
-const YT_VIDEO_ID = 'UKox4YEvLpg'; // Video nhạc nền
+const YT_VIDEO_ID = 'UKox4YEvLpg';
 
 function initYouTubePlayer() {
-  if (ytPlayerInitializing || (typeof YT !== 'undefined' && ytPlayer)) return;
-  ytPlayerInitializing = true;
-  
-  if (!document.getElementById('yt-iframe-api')) {
-    const tag = document.createElement('script');
-    tag.id = 'yt-iframe-api';
-    tag.src = "https://www.youtube.com/iframe_api";
-    document.head.appendChild(tag);
-  }
+    if (ytPlayerInitializing || (typeof YT !== 'undefined' && ytPlayer)) return;
+    ytPlayerInitializing = true;
+    
+    if (!document.getElementById('yt-iframe-api')) {
+        const tag = document.createElement('script');
+        tag.id = 'yt-iframe-api';
+        tag.src = "https://www.youtube.com/iframe_api";
+        document.head.appendChild(tag);
+    }
 }
 
 function onYouTubeIframeAPIReady() {
-  ytPlayer = new YT.Player('player', {
-    height: '0',
-    width: '0',
-    videoId: YT_VIDEO_ID,
-    playerVars: {
-      autoplay: 0,
-      controls: 0,
-      rel: 0,
-      modestbranding: 1,
-      playsinline: 1
-    },
-    events: {
-      'onReady': function(e) {
-        ytPlayerReady = true;
-        ytPlayerInitializing = false;
-        try { ytPlayer.setVolume(70); } catch(e) {}
-      },
-      'onStateChange': function(event) {
-        if (event.data === 0) {
-          musicButtonUpdateState(false);
-        } else if (event.data === 1) {
-          musicButtonUpdateState(true);
+    ytPlayer = new YT.Player('player', {
+        height: '0',
+        width: '0',
+        videoId: YT_VIDEO_ID,
+        playerVars: {
+            autoplay: 0,
+            controls: 0,
+            rel: 0,
+            modestbranding: 1,
+            playsinline: 1
+        },
+        events: {
+            'onReady': function(e) {
+                ytPlayerReady = true;
+                ytPlayerInitializing = false;
+                try { ytPlayer.setVolume(70); } catch(e) {}
+            },
+            'onStateChange': function(event) {
+                const musicBtn = document.getElementById('musicBtn');
+                if (musicBtn) {
+                    musicBtn.innerHTML = event.data === 1 ? '⏸️ Pause' : '🎵 Play';
+                }
+            }
         }
-      }
-    }
-  });
+    });
 }
 
-// Hàm phát nhạc khi copy
-function playMusicOnCopy() {
-  if (typeof ytPlayer !== 'undefined' && ytPlayerReady) {
-    ytPlayer.playVideo();
-    showToast("🎵 Nhạc nền đang phát! Chúc bạn may mắn!");
-  } else {
-    initYouTubePlayer();
-    // Đợi player ready rồi phát
-    let checkInterval = setInterval(() => {
-      if (ytPlayerReady) {
+function playMusic() {
+    if (typeof ytPlayer !== 'undefined' && ytPlayerReady) {
         ytPlayer.playVideo();
-        clearInterval(checkInterval);
         showToast("🎵 Nhạc nền đang phát!");
-      }
-    }, 500);
-    setTimeout(() => clearInterval(checkInterval), 10000);
-  }
+    } else {
+        initYouTubePlayer();
+        let checkInterval = setInterval(() => {
+            if (ytPlayerReady) {
+                ytPlayer.playVideo();
+                clearInterval(checkInterval);
+                showToast("🎵 Nhạc nền đang phát!");
+            }
+        }, 500);
+        setTimeout(() => clearInterval(checkInterval), 10000);
+    }
 }
 
 function toggleMusic() {
-  if (typeof ytPlayer !== 'undefined' && ytPlayerReady) {
-    const state = ytPlayer.getPlayerState();
-    if (state === 1) {
-      ytPlayer.pauseVideo();
-      musicButtonUpdateState(false);
-      showToast("⏸️ Đã tạm dừng nhạc");
+    if (typeof ytPlayer !== 'undefined' && ytPlayerReady) {
+        const state = ytPlayer.getPlayerState();
+        if (state === 1) {
+            ytPlayer.pauseVideo();
+            showToast("⏸️ Đã tạm dừng nhạc");
+        } else {
+            ytPlayer.playVideo();
+            showToast("▶️ Tiếp tục phát nhạc");
+        }
     } else {
-      ytPlayer.playVideo();
-      musicButtonUpdateState(true);
-      showToast("▶️ Tiếp tục phát nhạc");
+        initYouTubePlayer();
+        showToast("⏳ Đang tải nhạc, thử lại sau...");
+        setTimeout(() => toggleMusic(), 2000);
     }
-  } else {
-    initYouTubePlayer();
-    showToast("⏳ Đang tải nhạc, thử lại sau 2 giây...");
-    setTimeout(() => toggleMusic(), 2000);
-  }
 }
 
-function musicButtonUpdateState(isPlaying) {
-  const musicBtn = document.getElementById('musicButton');
-  if (musicBtn) {
-    musicBtn.innerHTML = isPlaying ? '⏸️ Pause Music' : '🎵 Play Music';
-  }
-}
-
-function showToast(message) {
-  const toast = document.createElement('div');
-  toast.className = 'toast';
-  toast.textContent = message;
-  document.body.appendChild(toast);
-  setTimeout(() => toast.remove(), 2500);
-}
-
-/* ---------- Time display ---------- */
+// ========== HIỂN THỊ THỜI GIAN ==========
 function updateTime() {
-  const now = new Date();
-  const hh = String(now.getHours()).padStart(2,'0');
-  const mm = String(now.getMinutes()).padStart(2,'0');
-  const ss = String(now.getSeconds()).padStart(2,'0');
-  const d = now.getDate(), m = now.getMonth()+1, y = now.getFullYear();
-  document.getElementById('clock').textContent = `${hh}:${mm}:${ss}`;
-  document.getElementById('dateDisplay').textContent = `📅 Hôm nay là ngày ${d}/${m}/${y}`;
-  document.title = `Key Ngày ${d}/${m}/${y}`;
-  setTimeout(updateTime, 1000);
+    const now = new Date();
+    const hh = String(now.getHours()).padStart(2,'0');
+    const mm = String(now.getMinutes()).padStart(2,'0');
+    const ss = String(now.getSeconds()).padStart(2,'0');
+    document.getElementById('clock').textContent = `${hh}:${mm}:${ss}`;
+    setTimeout(updateTime, 1000);
 }
 
-/* ---------- Khởi tạo ---------- */
-window.addEventListener('load', function() {
-  updateTime();
-  initYouTubePlayer(); // Khởi tạo sẵn player
-});
+// ========== KHỞI TẠO ==========
+document.getElementById('copyBtn').onclick = copyKey;
+document.getElementById('newKeyBtn').onclick = generateNewKey;
+document.getElementById('musicBtn').onclick = toggleMusic;
 
-// Music button
-const musicBtn = document.getElementById('musicButton');
-if (musicBtn) {
-  musicBtn.addEventListener('click', toggleMusic);
-}
+updateTime();
+initYouTubePlayer();
+
+// Console hướng dẫn
+console.log('%c🚀 API SYSTEM READY!', 'color: #4CAF50; font-size: 18px; font-weight: bold;');
+console.log('🔑 API Key cố định:', FIXED_API_KEY);
+console.log('📌 Key hiện tại:', currentKey);
+console.log('\n📖 CÁCH DÙNG API TRONG TOOL CỦA BẠN:');
+console.log(`1️⃣ Lấy key: ${baseUrl}?action=get&api_key=${FIXED_API_KEY}`);
+console.log(`2️⃣ Tạo key mới: ${baseUrl}?action=new&api_key=${FIXED_API_KEY}`);
+console.log(`3️⃣ Kiểm tra key: ${baseUrl}?action=verify&key=KEY&api_key=${FIXED_API_KEY}`);
+console.log(`4️⃣ Thống kê: ${baseUrl}?action=stats&api_key=${FIXED_API_KEY}`);
+console.log(`5️⃣ Danh sách key: ${baseUrl}?action=list&api_key=${FIXED_API_KEY}`);
+console.log('\n💡 Ví dụ Python:');
+console.log(`import requests`);
+console.log(`response = requests.get("${baseUrl}?action=get&api_key=${FIXED_API_KEY}")`);
+console.log(`print(response.json())`);
 </script>
 </body>
 </html>
