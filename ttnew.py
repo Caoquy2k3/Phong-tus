@@ -1263,7 +1263,7 @@ class TikTokBot:
 
             w, h = self.device.window_size()
             self.device.click(int(w * 0.9), int(h * 0.95))
-            time.sleep(0.8)
+            time.sleep(5.5)
 
             xml = self.device.dump_hierarchy()
 
@@ -1299,7 +1299,7 @@ class TikTokBot:
             
             if not self._check_app_status():
                 self._restart_tiktok()
-                time.sleep(1.2)
+                time.sleep(2.2)
                 continue
             
             username = self._click_username_by_dump()
@@ -1308,7 +1308,7 @@ class TikTokBot:
                 return username
             
             if attempt < max_retry - 1:
-                time.sleep(0.8)
+                time.sleep(1.3)
         
         return None
     
