@@ -1256,34 +1256,80 @@ class TikTokBot:
     # ==================== HÀM CHẠY CHÍNH ====================
     
     def _click_username_by_dump(self):
-        """Click vào username"""
+        """Click vào username - fix treo trên một số ROM"""
         try:
             if not self._check_app_status():
                 return None
 
             w, h = self.device.window_size()
-            self.device.click(int(w * 0.9), int(h * 0.95))
-            time.sleep(5.5)
+        
+            # Fallback: click góc phải dưới nếu dump lỗi
+            def fallback_click():
+                self.device.click(int(w * 0.9), int(h * 0.95))
+                time.sleep(1.2)
+                return None
 
-            xml = self.device.dump_hierarchy()
+            # Thử dump hierarchy với timeout (nếu device hỗ trợ)
+            try:
+                # Một số ROM cần wait sau click
+                time.sleep(0.5)
+            
+                # Dùng timeout để tránh treo vĩnh viễn
+                
+                xml_result = [None]
+            
+                def get_xml():
+                    try:
+                        xml_result[0] = self.device.dump_hierarchy()
+                    except Exception:
+                        pass
+            
+                thread = threading.Thread(target=get_xml)
+                thread.daemon = True
+                thread.start()
+                thread.join(timeout=3.0)  # timeout 3 giây
+            
+                xml = xml_result[0]
+                if not xml:
+                   return fallback_click()
+                
+            except Exception:
+                return fallback_click()
 
-            match = re.search(
+            # Tìm username với regex linh hoạt hơn
+            patterns = [
                 r'text="(@[^"]+)"[^>]*bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"',
-                xml
-            )
-
-            if match:
-                username_clean = match.group(1).replace("@", "").strip().lower()
+                r'text="([^"]*@[^"]*)"[^>]*bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"',
+                r'content-desc="[^"]*@[^"]*"[^>]*bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"'
+            ]
+        
+            for pattern in patterns:
+                match = re.search(pattern, xml, re.IGNORECASE)
+                if match:
+                    groups = match.groups()
+                    if pattern.startswith('text="(@'):
+                        username_clean = groups[0].replace("@", "").strip().lower()
+                        coords = list(map(int, groups[1:]))
+                    elif pattern.startswith('text="([^"]*@'):
+                        username_raw = groups[0]
+                        username_clean = re.sub(r'^@', '', username_raw).strip().lower()
+                        coords = list(map(int, groups[1:]))
+                    else:  # content-desc
+                        username_clean = None
+                        coords = list(map(int, groups[:4]))
                 
-                left, top, right, bottom = map(int, match.groups()[1:])
-                x = (left + right) // 2
-                y = (top + bottom) // 2
-
-                self.device.click(x, y)
+                    if len(coords) == 4:
+                        x = (coords[0] + coords[2]) // 2
+                        y = (coords[1] + coords[3]) // 2
+                        self.device.click(x, y)
+                        return username_clean
                 
-                return username_clean
+            # Không tìm thấy, dùng fallback
+            return fallback_click()
 
-        except Exception:
+        except Exception as e:
+            # Log lỗi nếu cần
+            # print(f"Error: {e}")
             pass
 
         return None
@@ -1299,7 +1345,7 @@ class TikTokBot:
             
             if not self._check_app_status():
                 self._restart_tiktok()
-                time.sleep(2.2)
+                time.sleep(1.2)
                 continue
             
             username = self._click_username_by_dump()
@@ -1308,7 +1354,7 @@ class TikTokBot:
                 return username
             
             if attempt < max_retry - 1:
-                time.sleep(1.3)
+                time.sleep(0.8)
         
         return None
     
