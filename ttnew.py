@@ -1291,7 +1291,7 @@ class TikTokBot:
             
             current = self.device.app_current()
             if current.get("package") == TIKTOK_PACKAGE:
-                self._wait_for_ui_stable(wait_time=1.5)
+                self._wait_for_ui_stable(wait_time=5.0)
                 return True
             
             return False
