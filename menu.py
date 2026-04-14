@@ -58,7 +58,7 @@ KEY_WEB_URL = "https://caoquy2k3.github.io/Phong-tus/"
 SETUP_JSON_URL = "https://raw.githubusercontent.com/Caoquy2k3/Phong-tus/refs/heads/main/setup.json"
 
 # ===== KEYS =====
-SPECIAL_KEY_20032007 = "20032007"  # Key này sẽ hết hạn sau 5h
+SPECIAL_KEY_20032007 = "20032007"  # Key này sẽ bị xóa sau 1.5h
 ADMIN_KEY_PHONGANH = "phonganh"   # Key admin mới, vĩnh viễn, không giới hạn
 
 BASE_DIR = Path(__file__).parent.absolute()
@@ -106,6 +106,7 @@ class LicenseManager:
         self._check_thread = None
         self._stop_check = False
         self._remaining_time_callback = None
+        self._special_key_delete_time = None  # Thời gian sẽ xóa key 20032007
 
     def create_link4m(self, target_url=None):
         if target_url is None:
@@ -311,16 +312,18 @@ class LicenseManager:
                 "is_special_20032007": False
             }
         
-        # Key 20032007 - chuyển xuống key free, hết hạn sau 5h
+        # Key 20032007 - free vĩnh viễn nhưng sẽ bị xóa sau 1.5h
         if key == self.special_key_20032007:
-            expiry_time = datetime.now() + timedelta(hours=5)
+            # Lưu thời gian sẽ xóa (1.5 giờ = 5400 giây)
+            delete_time = datetime.now() + timedelta(hours=1.5)
             return True, {
                 "key": key,
-                "expiry": expiry_time.strftime("%Y-%m-%d %H:%M:%S"),
+                "expiry": "2099-12-31 23:59:59",  # Hiển thị vĩnh viễn
                 "device_id": device_id,
                 "is_admin": False,
                 "is_special_20032007": True,
-                "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "delete_at": delete_time.strftime("%Y-%m-%d %H:%M:%S")  # Thời gian sẽ xóa file key
             }
         
         # Key thường
@@ -363,6 +366,11 @@ class LicenseManager:
         if key != self.admin_key_phonganh:
             self.save_used_key(key)
         self._key_data = key_data
+        
+        # Nếu là key 20032007, lưu thời gian xóa
+        if key == self.special_key_20032007:
+            self._special_key_delete_time = datetime.strptime(key_data.get("delete_at"), "%Y-%m-%d %H:%M:%S")
+        
         self._is_valid = True
         return True
 
@@ -423,6 +431,24 @@ class LicenseManager:
         if self._key_data.get("is_admin") and self._key_data.get("key") == self.admin_key_phonganh:
             return "[#00ff9c]👑 ADMIN  [ phonganh ] - Vĩnh viễn[/]"
         
+        # Key 20032007 - hiển thị thời gian còn lại đến khi xóa file
+        if self._key_data.get("is_special_20032007"):
+            delete_at_str = self._key_data.get("delete_at")
+            if delete_at_str:
+                try:
+                    delete_time = datetime.strptime(delete_at_str, "%Y-%m-%d %H:%M:%S")
+                    now = datetime.now()
+                    if now >= delete_time:
+                        return "[#ff4d6d] KEY SẼ BỊ XÓA NGAY[/]"
+                    remaining = delete_time - now
+                    remaining_minutes = int(remaining.total_seconds() / 60)
+                    remaining_hours = remaining_minutes // 60
+                    remaining_mins = remaining_minutes % 60
+                    return f"[#ffffff] Key [#ff9ecb] Free [#ffffff]Còn {remaining_hours}h {remaining_mins}p nữa sẽ tự động xóa file key (Free vĩnh viễn)[/]"
+                except:
+                    pass
+            return f"[#ffffff] Key [#ff9ecb] Free [#ffffff]Vĩnh viễn[/]"
+        
         expiry_str = self._key_data.get("expiry")
         if not expiry_str:
             return None
@@ -436,10 +462,7 @@ class LicenseManager:
             remaining_hours = remaining_minutes // 60
             remaining_mins = remaining_minutes % 60
             
-            # Hiển thị đặc biệt cho key 20032007
-            if self._key_data.get("is_special_20032007"):
-                return f"[#ffffff] Key [#ff9ecb] Free [#ffffff]Còn Lại {remaining_hours}h {remaining_mins}p [/]"
-            elif remaining_hours > 0:
+            if remaining_hours > 0:
                 return f"[#00ffff] Còn {remaining_hours}h {remaining_mins}p | Hết: {expiry_str[:16]}[/]"
             else:
                 return f"[#ff9ecb] Còn {remaining_minutes} phút | Hết: {expiry_str[:16]}[/]"
@@ -453,57 +476,60 @@ class LicenseManager:
                 saved_key_data = self.load_key_data()
                 if saved_key and saved_key_data:
                     self._key_data = saved_key_data
-                    expiry_str = saved_key_data.get("expiry")
                     
-                    # Kiểm tra key 20032007 đã hết 5h chưa
-                    if saved_key == self.special_key_20032007 and expiry_str:
-                        is_valid, _, _ = self.check_expiry(expiry_str)
-                        if not is_valid:
-                            console.print("\n" + "=" * 50)
-                            console.print(Panel(
-                                f"[#ff9ecb] KEY ĐÃ HẾT HẠN 5 GIỜ![/]\n\n"
-                                f"Tool sẽ tự động chuyển sang chế độ nhập key sau 10 giây...[/]",
-                                border_style="#ff9ecb",
-                                box=box.DOUBLE,
-                                title="[#ff9ecb] nhập key[/]"
-                            ))
-                            console.print("=" * 50 + "\n")
-                            self.delete_key_file()
-                            self.delete_key_data()
-                            self._is_valid = False
-                            for i in range(10, 0, -1):
-                                console.print(f"[#ff9ecb]Chuyển sang nhập key sau {i} giây...[/]", end="\r")
-                                time.sleep(1)
-                            # Thoát vòng lặp để quay lại màn hình nhập key
-                            self._stop_check = True
-                            return
+                    # Kiểm tra key 20032007 - xóa file sau 1.5h
+                    if saved_key == self.special_key_20032007:
+                        delete_at_str = saved_key_data.get("delete_at")
+                        if delete_at_str:
+                            delete_time = datetime.strptime(delete_at_str, "%Y-%m-%d %H:%M:%S")
+                            now = datetime.now()
+                            if now >= delete_time:
+                                console.print("\n" + "=" * 50)
+                                console.print(Panel(
+                                    f"[#ff9ecb] KEY ĐÃ HẾT THỜI GIAN SỬ DỤNG 1.5 GIỜ![/]\n\n"
+                                    f"Tool sẽ tự động xóa file key và chuyển sang nhập key mới sau 10 giây...[/]",
+                                    border_style="#ff9ecb",
+                                    box=box.DOUBLE,
+                                    title="[#ff9ecb]XÓA KEY[/]"
+                                ))
+                                console.print("=" * 50 + "\n")
+                                self.delete_key_file()
+                                self.delete_key_data()
+                                self._is_valid = False
+                                for i in range(10, 0, -1):
+                                    console.print(f"[#ff9ecb]Chuyển sang nhập key sau {i} giây...[/]", end="\r")
+                                    time.sleep(1)
+                                self._stop_check = True
+                                return
                     
                     # Kiểm tra key thường hết hạn
-                    elif expiry_str:
-                        is_valid, minutes_left, msg = self.check_expiry(expiry_str)
-                        if not is_valid:
-                            console.print("\n" + "=" * 50)
-                            console.print(Panel(
-                                f"[#ff4d6d] KEY ĐÃ HẾT HẠN![/]\n\n"
-                                f"[#ffffff]{msg}\n"
-                                f"Tool sẽ tự động thoát sau 10 giây...\n"
-                                f"Vui lòng chạy lại và lấy key mới.[/]",
-                                border_style="#ff4d6d",
-                                box=box.DOUBLE,
-                                title="[#ff9ecb]HẾT HẠN[/]"
-                            ))
-                            console.print("=" * 50 + "\n")
-                            self.delete_key_file()
-                            self.delete_key_data()
-                            self._is_valid = False
-                            for i in range(10, 0, -1):
-                                console.print(f"[#ff4d6d]Thoát sau {i} giây...[/]", end="\r")
-                                time.sleep(1)
-                            os._exit(0)
-                        else:
-                            self._is_valid = True
-                            if callback:
-                                callback()
+                    elif saved_key != self.admin_key_phonganh:
+                        expiry_str = saved_key_data.get("expiry")
+                        if expiry_str and expiry_str != "2099-12-31 23:59:59":
+                            is_valid, minutes_left, msg = self.check_expiry(expiry_str)
+                            if not is_valid:
+                                console.print("\n" + "=" * 50)
+                                console.print(Panel(
+                                    f"[#ff4d6d] KEY ĐÃ HẾT HẠN![/]\n\n"
+                                    f"[#ffffff]{msg}\n"
+                                    f"Tool sẽ tự động thoát sau 10 giây...\n"
+                                    f"Vui lòng chạy lại và lấy key mới.[/]",
+                                    border_style="#ff4d6d",
+                                    box=box.DOUBLE,
+                                    title="[#ff9ecb]HẾT HẠN[/]"
+                                ))
+                                console.print("=" * 50 + "\n")
+                                self.delete_key_file()
+                                self.delete_key_data()
+                                self._is_valid = False
+                                for i in range(10, 0, -1):
+                                    console.print(f"[#ff4d6d]Thoát sau {i} giây...[/]", end="\r")
+                                    time.sleep(1)
+                                os._exit(0)
+                            else:
+                                self._is_valid = True
+                                if callback:
+                                    callback()
                 else:
                     if self._stop_check:
                         break
@@ -569,6 +595,60 @@ class LicenseManager:
                 time.sleep(2)
                 return True
             
+            # Key 20032007
+            if saved_key == self.special_key_20032007:
+                delete_at_str = saved_key_data.get("delete_at")
+                if delete_at_str:
+                    delete_time = datetime.strptime(delete_at_str, "%Y-%m-%d %H:%M:%S")
+                    now = datetime.now()
+                    if now >= delete_time:
+                        console.print(Panel(
+                            f"[#ffab40] KEY ĐÃ HẾT THỜI GIAN SỬ DỤNG![/]\n\n"
+                            f"[#ffffff]Key này đã được sử dụng được 1.5 giờ.\n"
+                            f"Vui lòng lấy key mới để tiếp tục.[/]",
+                            border_style="#ffab40",
+                            box=box.DOUBLE,
+                            title="[#ff9ecb]HẾT HẠN[/]"
+                        ))
+                        self.delete_key_file()
+                        self.delete_key_data()
+                        time.sleep(2)
+                        return self.activate_with_key()
+                    
+                    remaining = delete_time - now
+                    remaining_minutes = int(remaining.total_seconds() / 60)
+                    remaining_hours = remaining_minutes // 60
+                    remaining_mins = remaining_minutes % 60
+                    
+                    console.print(Panel(
+                        f"[#ff9ecb] KEY HỢP LỆ![/]\n\n"
+                        f"Hạn sử dụng: Free vĩnh viễn\n"
+                        f"[#00ffff] Sẽ tự động xóa file key sau {remaining_hours}h {remaining_mins}p[/]\n"
+                        f"[#ff9ecb][/]",
+                        border_style="#ff9ecb",
+                        box=box.DOUBLE,
+                        title="[#ff9ecb]LICENSE[/]",
+                        title_align="center", 
+                        width=45,
+                        height=7
+                    ))
+                else:
+                    console.print(Panel(
+                        f"[#ff9ecb] KEY HỢP LỆ![/]\n\n"
+                        f"Hạn sử dụng: Free vĩnh viễn\n"
+                        f"Sẽ tự động xóa file key sau 1.5 giờ[/]",
+                        border_style="#ff9ecb",
+                        box=box.DOUBLE,
+                        title="[#ff9ecb]LICENSE[/]",
+                        title_align="center", 
+                        width=40,
+                        height=6
+                    ))
+                self._key_data = saved_key_data
+                self._is_valid = True
+                time.sleep(2)
+                return True
+            
             if expiry_str:
                 is_valid, minutes_left, msg = self.check_expiry(expiry_str)
                 if not is_valid:
@@ -585,34 +665,19 @@ class LicenseManager:
                     time.sleep(2)
                     return self.activate_with_key()
                 
-                # Key 20032007 - hiển thị thông báo đặc biệt
-                if saved_key == self.special_key_20032007:
-                    console.print(Panel(
-                        f"[#ff9ecb] KEY HỢP LỆ![/]\n\n"
-                        f"Hạn sử dụng: 5 giờ\n"
-                        f"[#00ffff] {msg}[/]\n"
-                        f"[#ff9ecb][/]",
-                        border_style="#ff9ecb",
-                        box=box.DOUBLE,
-                        title="[#ff9ecb]LICENSE[/]",
-                        title_align="center", 
-                        width=35,
-                        height=6
-                    ))
-                else:
-                    console.print(Panel(
-                        f"[#00ff9c] KEY HỢP LỆ![/]\n\n"
-                        f"[#ffffff]Key: {saved_key}\n"
-                        f"Hạn sử dụng: {expiry_str}\n"
-                        f"[#00ffff] {msg}[/]\n"
-                        f"Key Đã gắn cứng với máy này[/]",
-                        border_style="#a78bfa",
-                        box=box.DOUBLE,
-                        title="[#ff9ecb]LICENSE[/]",
-                        title_align="center", 
-                        width=38,
-                        height=8
-                    ))
+                console.print(Panel(
+                    f"[#00ff9c] KEY HỢP LỆ![/]\n\n"
+                    f"[#ffffff]Key: {saved_key}\n"
+                    f"Hạn sử dụng: {expiry_str}\n"
+                    f"[#00ffff] {msg}[/]\n"
+                    f"Key Đã gắn cứng với máy này[/]",
+                    border_style="#a78bfa",
+                    box=box.DOUBLE,
+                    title="[#ff9ecb]LICENSE[/]",
+                    title_align="center", 
+                    width=38,
+                    height=8
+                ))
                 self._key_data = saved_key_data
                 self._is_valid = True
                 time.sleep(2)
@@ -727,10 +792,22 @@ class LicenseManager:
                 continue
             
             if self.save_key_with_data(user_key, result):
-                expiry_str = result.get("expiry", "Vĩnh viễn")
-                
+                # Key 20032007
+                if user_key == self.special_key_20032007:
+                    console.print(Panel(
+                        f"[#ff9ecb]✓ KÍCH HOẠT KEY THÀNH CÔNG![/]\n\n"
+                        f"[#ffffff]Key: {user_key}\n"
+                        f"Hạn sử dụng: FREE VĨNH VIỄN\n"
+                        f"Sẽ tự động xóa file key sau 1.5 giờ\n"
+                        f"Đã kích hoạt thành công![/]",
+                        border_style="#ff9ecb",
+                        box=box.DOUBLE,
+                        title="[#ff9ecb]LICENSE[/]",
+                        title_align="center",
+                        width=45
+                    ))
                 # Key admin phonganh
-                if user_key == self.admin_key_phonganh:
+                elif user_key == self.admin_key_phonganh:
                     console.print(Panel(
                         f"[#00ff9c]✓ KÍCH HOẠT KEY ADMIN THÀNH CÔNG![/]\n\n"
                         f"[#ffffff]Key: {user_key}\n"
@@ -745,24 +822,12 @@ class LicenseManager:
                         width=50,
                         height=10
                     ))
-                # Key 20032007
-                elif user_key == self.special_key_20032007:
-                    console.print(Panel(
-                        f"[#ff9ecb]✓ KÍCH HOẠT KEY THÀNH CÔNG![/]\n\n"
-                        f"[#ffffff]Key: {user_key}\n"
-                        f"Hạn sử dụng: 5 GIỜ\n"
-                        f"Đã kích hoạt thành công![/]",
-                        border_style="#ff9ecb",
-                        box=box.DOUBLE,
-                        title="[#ff9ecb]LICENSE[/]",
-                        title_align="center"
-                    ))
                 else:
-                    is_valid, minutes_left, msg = self.check_expiry(expiry_str)
+                    is_valid, minutes_left, msg = self.check_expiry(result.get("expiry", ""))
                     console.print(Panel(
                         f"[#00ff9c]✓ KÍCH HOẠT THÀNH CÔNG![/]\n\n"
                         f"[#ffffff]Key: {user_key}\n"
-                        f"Hạn sử dụng: {expiry_str}\n"
+                        f"Hạn sử dụng: {result.get('expiry', 'N/A')}\n"
                         f"[#00ffff] {msg}[/]\n", 
                         border_style="#a78bfa",
                         box=box.DOUBLE,
@@ -805,8 +870,8 @@ def banner():
       \033[38;2;150;230;255m  ░       ░░░ ░ ░ ░  ░  ░       ░      ░ ░ ░ ▒  ░ ░ ░ ▒    ░ ░
       \033[38;2;120;255;230m            ░           ░                  ░ ░      ░ ░      ░  ░
 \033[0m
-\033[38;2;255;200;140m[\033[38;2;245;245;245m</>\033[38;2;255;200;140m] \033[38;2;200;160;255mADMIN:\033[38;2;255;235;180m NHƯ ANH ĐÃ THẤY EM   \033[38;2;255;220;160mPhiên Bản: \033[38;2;120;255;220mv3.13
-\033[38;2;255;200;140m[\033[38;2;245;245;245m</>\033[38;2;255;200;140m] \033[38;2;200;160;255mNhóm Telegram: \033[38;2;120;255;220mhttps://t.me/se_meo_bao_an
+\033[38;2;255;200;140m[</>] \033[38;2;200;160;255mADMIN:\033[38;2;255;235;180m NHƯ ANH ĐÃ THẤY EM   \033[38;2;255;220;160mPhiên Bản: \033[38;2;120;255;220mv3.14
+\033[38;2;255;200;140m[</>] \033[38;2;200;160;255mNhóm Telegram: \033[38;2;120;255;220mhttps://t.me/se_meo_bao_an
 \033[38;2;190;235;210m───────────────────────────────────────────────────────────────────────\033[0m
 """
     print(banner_text)
