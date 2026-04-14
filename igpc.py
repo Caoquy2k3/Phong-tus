@@ -45,9 +45,9 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 console = Console()
 
 # ========== CẤU HÌNH HIỆU SUẤT ==========
-WINDOW_WIDTH = 150           # Chiều rộng cửa sổ trình duyệt (nhỏ gọn)
-WINDOW_HEIGHT = 150         # Chiều cao cửa sổ trình duyệt
-ZOOM_LEVEL = 0.50           # Tỷ lệ thu phóng 25%
+WINDOW_WIDTH = 50           # Chiều rộng cửa sổ trình duyệt (nhỏ gọn)
+WINDOW_HEIGHT = 100         # Chiều cao cửa sổ trình duyệt
+ZOOM_LEVEL = 0.25           # Tỷ lệ thu phóng 25%
 DISABLE_IMAGES = True       # Tắt load ảnh để tiết kiệm RAM
 
 # ========== CẤU HÌNH ANTI-BAN ==========
@@ -2660,19 +2660,18 @@ def banner():
 
 # ========== HÀM XÂY DỰNG BẢNG DASHBOARD ==========
 def build_table():
-    table = Table(box=box.SQUARE, title="[bold cyan]DASHBOARD INSTAGRAM TOOL[/bold cyan]")
-
-    table.add_column("STT", justify="center", style="dim", width=4)
-    table.add_column("Username", style="cyan", width=12)
-    table.add_column("Nick Golike", style="yellow", width=12)
-    table.add_column("Trạng thái", style="bold", justify="center", width=12)
-    table.add_column("Đã làm", justify="center", style="green", width=6)
-    table.add_column("Bỏ qua", justify="center", style="red", width=6)
-    table.add_column("Follow", justify="center", width=5)
-    table.add_column("Like", justify="center", width=5)
-    table.add_column("Comment", justify="center", width=6)
-    table.add_column("Coin", justify="center", style="yellow", width=5)
-    table.add_column("Chi tiết", style="magenta", width=25)
+    table = Table(box=box.SQUARE,title="[bold #ffffff]DASHBOARD INSTAGRAM TOOL[/]",border_style="#ff9ecb")
+    table.add_column("STT", justify="center", style="#8b8b8b", width=4)
+    table.add_column("Username", style="#4dd6ff", width=12)
+    table.add_column("Nick Golike", style="#ff9ecb", width=12)
+    table.add_column("Trạng thái", justify="center", style="#ff5c7a", width=12)
+    table.add_column("Đã làm", justify="center", style="#39ff88", width=6)
+    table.add_column("Bỏ qua", justify="center", style="#ff9f43", width=6)
+    table.add_column("Follow", justify="center", style="#6c7bff", width=5)
+    table.add_column("Like", justify="center", style="#ffd166", width=5)
+    table.add_column("Comment", justify="center", style="#00e5ff", width=6)
+    table.add_column("Coin", justify="center", style="#f7b731", width=5)
+    table.add_column("Chi tiết", style="#ffffff", width=25)
 
     for i, (acc_id, data) in enumerate(all_accounts_data.items(), 1):
         if not data.get("is_running", True):
