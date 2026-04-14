@@ -1255,26 +1255,64 @@ class TikTokBot:
     
     # ==================== HÀM CHẠY CHÍNH ====================
     
+    def _open_user_profile_by_deeplink(self, username=None):
+        """
+        Mở trang profile bằng deep link intent - Tránh lỗi click UI trên nhiều dòng máy
+        Sử dụng adb shell am start với deep link tiktok://user/profile
+        """
+        try:
+            if not self._check_and_reconnect_adb():
+                return None
+            
+            # Sử dụng deep link mặc định nếu không có username
+            # tiktok://user/profile sẽ mở profile của user đang đăng nhập
+            deeplink = "tiktok://user/profile"
+            
+            if username:
+                deeplink = f"tiktok://user?username={username}"
+            
+            # Method 1: Dùng uiautomator2 shell
+            cmd = f'am start -a android.intent.action.VIEW -d "{deeplink}" {TIKTOK_PACKAGE}'
+            result = self.device.shell(cmd)
+            
+            # Chờ app mở và load profile
+            time.sleep(2.5)
+            
+            # Kiểm tra xem đã mở đúng app chưa
+            current = self.device.app_current()
+            if current.get("package") == TIKTOK_PACKAGE:
+                self._wait_for_ui_stable(wait_time=1.5)
+                return True
+            
+            # Fallback: Thử intent khác
+            cmd2 = f'am start -a android.intent.action.VIEW -d "tiktok://user" {TIKTOK_PACKAGE}'
+            self.device.shell(cmd2)
+            time.sleep(2)
+            
+            current = self.device.app_current()
+            if current.get("package") == TIKTOK_PACKAGE:
+                self._wait_for_ui_stable(wait_time=1.5)
+                return True
+            
+            return False
+            
+        except Exception as e:
+            self._add_response_message(u"[WARN] Lỗi mở profile bằng deeplink: {}".format(str(e)))
+            return False
+    
     def _click_username_by_dump(self):
-        """Click vào username - fix treo trên một số ROM"""
+        """
+        Lấy username từ UI dump - ĐÃ TỐI ƯU, chỉ lấy username không click
+        """
         try:
             if not self._check_app_status():
                 return None
 
             w, h = self.device.window_size()
         
-            # Fallback: click góc phải dưới nếu dump lỗi
-            def fallback_click():
-                self.device.click(int(w * 0.9), int(h * 0.95))
-                time.sleep(1.2)
-                return None
-
-            # Thử dump hierarchy với timeout (nếu device hỗ trợ)
+            # Thử dump hierarchy với timeout (tránh treo)
             try:
-                # Một số ROM cần wait sau click
                 time.sleep(0.5)
-            
-                # Dùng timeout để tránh treo vĩnh viễn
                 
                 xml_result = [None]
             
@@ -1287,16 +1325,16 @@ class TikTokBot:
                 thread = threading.Thread(target=get_xml)
                 thread.daemon = True
                 thread.start()
-                thread.join(timeout=3.0)  # timeout 3 giây
+                thread.join(timeout=3.0)
             
                 xml = xml_result[0]
                 if not xml:
-                   return fallback_click()
+                    return None
                 
             except Exception:
-                return fallback_click()
+                return None
 
-            # Tìm username với regex linh hoạt hơn
+            # Tìm username với regex linh hoạt
             patterns = [
                 r'text="(@[^"]+)"[^>]*bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"',
                 r'text="([^"]*@[^"]*)"[^>]*bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"',
@@ -1309,33 +1347,32 @@ class TikTokBot:
                     groups = match.groups()
                     if pattern.startswith('text="(@'):
                         username_clean = groups[0].replace("@", "").strip().lower()
-                        coords = list(map(int, groups[1:]))
+                        return username_clean
                     elif pattern.startswith('text="([^"]*@'):
                         username_raw = groups[0]
                         username_clean = re.sub(r'^@', '', username_raw).strip().lower()
-                        coords = list(map(int, groups[1:]))
-                    else:  # content-desc
-                        username_clean = None
-                        coords = list(map(int, groups[:4]))
-                
-                    if len(coords) == 4:
-                        x = (coords[0] + coords[2]) // 2
-                        y = (coords[1] + coords[3]) // 2
-                        self.device.click(x, y)
                         return username_clean
+                    else:  # content-desc
+                        # Có thể lấy username từ content-desc
+                        desc = groups[0] if groups else ""
+                        # Tìm username pattern trong content-desc
+                        user_match = re.search(r'@([a-zA-Z0-9_.]+)', desc)
+                        if user_match:
+                            return user_match.group(1).strip().lower()
+                        return None
                 
-            # Không tìm thấy, dùng fallback
-            return fallback_click()
+            return None
 
         except Exception as e:
-            # Log lỗi nếu cần
-            # print(f"Error: {e}")
             pass
 
         return None
     
     def _get_tiktok_username(self, max_retry=3):
-        """Lấy username TikTok"""
+        """
+        Lấy username TikTok bằng cách mở profile qua deep link và lấy từ UI
+        SỬ DỤNG DEEP LINK THAY VÌ CLICK UI
+        """
         if self.stop_flag or is_stop_all():
             return None
         
@@ -1348,14 +1385,27 @@ class TikTokBot:
                 time.sleep(1.2)
                 continue
             
+            # === CÁCH MỚI: Dùng deep link để mở profile ===
+            if not self._open_user_profile_by_deeplink():
+                if attempt < max_retry - 1:
+                    self._restart_tiktok()
+                    time.sleep(1.5)
+                continue
+            
+            # Chờ profile load
+            time.sleep(1.5)
+            
+            # Lấy username từ UI dump
             username = self._click_username_by_dump()
             
             if username and len(username) > 1:
+                self._add_response_message(u"[OK] Lấy được username: {}".format(username))
                 return username
             
             if attempt < max_retry - 1:
-                time.sleep(0.8)
+                time.sleep(1)
         
+        self._add_response_message(u"[ERROR] Không thể lấy username TikTok sau {} lần thử".format(max_retry))
         return None
     
     def _force_stop_tiktok(self):
@@ -1428,7 +1478,7 @@ class TikTokBot:
         self._start_tiktok_and_wait()
         time.sleep(2.5)
         
-        # Lấy username TikTok
+        # Lấy username TikTok - ĐÃ CẬP NHẬT DÙNG DEEP LINK
         auto_username = self._get_tiktok_username(max_retry=3)
         
         if not auto_username:
