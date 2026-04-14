@@ -57,8 +57,9 @@ LINK4M_API_KEY = "68b724432ecbb063ee12123a"
 KEY_WEB_URL = "https://caoquy2k3.github.io/Phong-tus/"
 SETUP_JSON_URL = "https://raw.githubusercontent.com/Caoquy2k3/Phong-tus/refs/heads/main/setup.json"
 
-# ===== KEY ĐẶC BIỆT PHONGTUS (ADMIN) =====
-SPECIAL_KEY = "20032007"
+# ===== KEYS =====
+SPECIAL_KEY_20032007 = "20032007"  # Key này sẽ hết hạn sau 5h
+ADMIN_KEY_PHONGANH = "phonganh"   # Key admin mới, vĩnh viễn, không giới hạn
 
 BASE_DIR = Path(__file__).parent.absolute()
 KEY_DIR = BASE_DIR / "key"
@@ -97,7 +98,8 @@ class LicenseManager:
         self.last_check_file = LAST_CHECK_FILE
         self.api_key = LINK4M_API_KEY
         self.key_web = KEY_WEB_URL
-        self.special_key = SPECIAL_KEY
+        self.special_key_20032007 = SPECIAL_KEY_20032007
+        self.admin_key_phonganh = ADMIN_KEY_PHONGANH
         self._current_device_id = None
         self._is_valid = False
         self._key_data = None
@@ -255,7 +257,7 @@ class LicenseManager:
             return []
 
     def save_used_key(self, key):
-        if key == self.special_key:
+        if key == self.admin_key_phonganh:
             return True
         try:
             used_keys = self.load_used_keys()
@@ -271,7 +273,7 @@ class LicenseManager:
             return False
 
     def is_key_used(self, key):
-        if key == self.special_key:
+        if key == self.admin_key_phonganh:
             return False
         used_keys = self.load_used_keys()
         return key in used_keys
@@ -298,13 +300,30 @@ class LicenseManager:
 
     def verify_key(self, key):
         device_id = self.get_device_id()
-        if key == self.special_key:
+        
+        # Key admin mới phonganh - vĩnh viễn, không giới hạn
+        if key == self.admin_key_phonganh:
             return True, {
                 "key": key,
                 "expiry": "2099-12-31 23:59:59",
                 "device_id": device_id,
-                "is_admin": True
+                "is_admin": True,
+                "is_special_20032007": False
             }
+        
+        # Key 20032007 - chuyển xuống key free, hết hạn sau 5h
+        if key == self.special_key_20032007:
+            expiry_time = datetime.now() + timedelta(hours=5)
+            return True, {
+                "key": key,
+                "expiry": expiry_time.strftime("%Y-%m-%d %H:%M:%S"),
+                "device_id": device_id,
+                "is_admin": False,
+                "is_special_20032007": True,
+                "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            }
+        
+        # Key thường
         if not key.startswith("PHONG-TUS-") or len(key) != 26:
             return False, "invalid_format"
         if self.is_key_used(key):
@@ -332,7 +351,8 @@ class LicenseManager:
             "key": key,
             "expiry": expiry_time.strftime("%Y-%m-%d %H:%M:%S"),
             "device_id": device_id,
-            "is_admin": False
+            "is_admin": False,
+            "is_special_20032007": False
         }
 
     def save_key_with_data(self, key, key_data):
@@ -340,7 +360,7 @@ class LicenseManager:
             return False
         if not self.save_key_data(key_data):
             return False
-        if key != self.special_key:
+        if key != self.admin_key_phonganh:
             self.save_used_key(key)
         self._key_data = key_data
         self._is_valid = True
@@ -351,6 +371,11 @@ class LicenseManager:
         saved_key = self.load_key_from_file()
         if not saved_key or not saved_key_data:
             return True
+        
+        # Key admin phonganh không check share
+        if saved_key == self.admin_key_phonganh:
+            return True
+        
         current_device_id = self.get_device_id()
         saved_device_id = saved_key_data.get("device_id")
         if saved_device_id and saved_device_id != current_device_id:
@@ -393,8 +418,11 @@ class LicenseManager:
             if not key_data:
                 return None
             self._key_data = key_data
-        if self._key_data.get("is_admin"):
-            return "[#00ff9c]👑 ADMIN MODE - Vĩnh viễn[/]"
+        
+        # Key admin phonganh - vĩnh viễn
+        if self._key_data.get("is_admin") and self._key_data.get("key") == self.admin_key_phonganh:
+            return "[#00ff9c]👑 ADMIN  [ phonganh ] - Vĩnh viễn[/]"
+        
         expiry_str = self._key_data.get("expiry")
         if not expiry_str:
             return None
@@ -407,10 +435,10 @@ class LicenseManager:
             remaining_minutes = int(remaining.total_seconds() / 60)
             remaining_hours = remaining_minutes // 60
             remaining_mins = remaining_minutes % 60
-            remaining_days = remaining_hours // 24
-            if remaining_days > 0:
-                remaining_hours = remaining_hours % 24
-                return f"[#00ffff] Còn {remaining_days} ngày {remaining_hours}h {remaining_mins}p | Hết: {expiry_str[:16]}[/]"
+            
+            # Hiển thị đặc biệt cho key 20032007
+            if self._key_data.get("is_special_20032007"):
+                return f"[#ffffff] Key [#ff9ecb] Free [#ffffff]Còn Lại {remaining_hours}h {remaining_mins}p [/]"
             elif remaining_hours > 0:
                 return f"[#00ffff] Còn {remaining_hours}h {remaining_mins}p | Hết: {expiry_str[:16]}[/]"
             else:
@@ -426,7 +454,32 @@ class LicenseManager:
                 if saved_key and saved_key_data:
                     self._key_data = saved_key_data
                     expiry_str = saved_key_data.get("expiry")
-                    if expiry_str:
+                    
+                    # Kiểm tra key 20032007 đã hết 5h chưa
+                    if saved_key == self.special_key_20032007 and expiry_str:
+                        is_valid, _, _ = self.check_expiry(expiry_str)
+                        if not is_valid:
+                            console.print("\n" + "=" * 50)
+                            console.print(Panel(
+                                f"[#ff9ecb] KEY ĐÃ HẾT HẠN 5 GIỜ![/]\n\n"
+                                f"Tool sẽ tự động chuyển sang chế độ nhập key sau 10 giây...[/]",
+                                border_style="#ff9ecb",
+                                box=box.DOUBLE,
+                                title="[#ff9ecb] nhập key[/]"
+                            ))
+                            console.print("=" * 50 + "\n")
+                            self.delete_key_file()
+                            self.delete_key_data()
+                            self._is_valid = False
+                            for i in range(10, 0, -1):
+                                console.print(f"[#ff9ecb]Chuyển sang nhập key sau {i} giây...[/]", end="\r")
+                                time.sleep(1)
+                            # Thoát vòng lặp để quay lại màn hình nhập key
+                            self._stop_check = True
+                            return
+                    
+                    # Kiểm tra key thường hết hạn
+                    elif expiry_str:
                         is_valid, minutes_left, msg = self.check_expiry(expiry_str)
                         if not is_valid:
                             console.print("\n" + "=" * 50)
@@ -495,6 +548,27 @@ class LicenseManager:
         if saved_key and saved_key_data:
             console.print("[#00ffff]  Đang kiểm tra key...[/]")
             expiry_str = saved_key_data.get("expiry")
+            
+            # Key admin phonganh - hợp lệ vĩnh viễn
+            if saved_key == self.admin_key_phonganh:
+                console.print(Panel(
+                    f"[#00ff9c] KEY ADMIN HỢP LỆ![/]\n"
+                    f"[#ffffff]Key: {saved_key}\n"
+                    f"Hạn sử dụng: Vĩnh viễn\n"
+                    f"Chế độ: [bold]Admin - Không giới hạn[/]\n"
+                    f"Đã kích hoạt thành công![/]",
+                    border_style="#a78bfa",
+                    box=box.DOUBLE,
+                    title="[#ff9ecb]LICENSE[/]",
+                    title_align="center", 
+                    width=38,
+                    height=8 
+                ))
+                self._key_data = saved_key_data
+                self._is_valid = True
+                time.sleep(2)
+                return True
+            
             if expiry_str:
                 is_valid, minutes_left, msg = self.check_expiry(expiry_str)
                 if not is_valid:
@@ -510,37 +584,35 @@ class LicenseManager:
                     self.delete_key_data()
                     time.sleep(2)
                     return self.activate_with_key()
-                if saved_key == self.special_key:
+                
+                # Key 20032007 - hiển thị thông báo đặc biệt
+                if saved_key == self.special_key_20032007:
                     console.print(Panel(
-                        f"[#00ff9c]✅ KEY ADMIN HỢP LỆ![/]\n"
+                        f"[#ff9ecb] KEY HỢP LỆ![/]\n\n"
+                        f"Hạn sử dụng: 5 giờ\n"
+                        f"[#00ffff] {msg}[/]\n"
+                        f"[#ff9ecb][/]",
+                        border_style="#ff9ecb",
+                        box=box.DOUBLE,
+                        title="[#ff9ecb]LICENSE[/]",
+                        title_align="center", 
+                        width=35,
+                        height=6
+                    ))
+                else:
+                    console.print(Panel(
+                        f"[#00ff9c] KEY HỢP LỆ![/]\n\n"
                         f"[#ffffff]Key: {saved_key}\n"
-                        f"Hạn sử dụng: Vĩnh viễn\n"
-                        f"Chế độ: [bold]Admin - Không giới hạn[/]\n"
-                        f"Đã kích hoạt thành công![/]",
+                        f"Hạn sử dụng: {expiry_str}\n"
+                        f"[#00ffff] {msg}[/]\n"
+                        f"Key Đã gắn cứng với máy này[/]",
                         border_style="#a78bfa",
                         box=box.DOUBLE,
                         title="[#ff9ecb]LICENSE[/]",
                         title_align="center", 
                         width=38,
-                        height=8 
+                        height=8
                     ))
-                    self._key_data = saved_key_data
-                    self._is_valid = True
-                    time.sleep(2)
-                    return True
-                console.print(Panel(
-                    f"[#00ff9c]✅ KEY HỢP LỆ![/]\n\n"
-                    f"[#ffffff]Key: {saved_key}\n"
-                    f"Hạn sử dụng: {expiry_str}\n"
-                    f"[#00ffff] {msg}[/]\n"
-                    f"Key Đã gắn cứng với máy này[/]",
-                    border_style="#a78bfa",
-                    box=box.DOUBLE,
-                    title="[#ff9ecb]LICENSE[/]",
-                    title_align="center", 
-                    width=38,
-                    height=8
-                ))
                 self._key_data = saved_key_data
                 self._is_valid = True
                 time.sleep(2)
@@ -558,14 +630,14 @@ class LicenseManager:
                 f"3. Web sẽ tự tạo key ngẫu nhiên cho bạn\n"
                 f"4. Copy key và paste vào đây để kích hoạt\n\n"
                 f"[#ff9ecb]  LƯU Ý QUAN TRỌNG:[/]\n"
-                f"• Mỗi key chỉ dùng 1 lần duy nhất\n"
+                f"• Mỗi key thường chỉ dùng 1 lần duy nhất\n"
                 f"[#00ffff]• Gõ 'doilink' để đổi link lấy key mới[/]",
                 border_style="#a78bfa",
                 title="[#ff9ecb]KÍCH HOẠT[/]",
                 title_align="center",
                 box=box.DOUBLE, 
-                width=46,
-                height=10
+                width=50,
+                height=14
             ))
             console.print("[#00ffff]  Đang tạo link...[/]")
             short_link = self.create_link4m(current_url)
@@ -578,27 +650,31 @@ class LicenseManager:
                 f"[#ff9ecb]➤[#ffffff]  Copy link trên và mở trong trình duyệt\n"
                 f"[#ff9ecb]➤[#ffffff] Web sẽ tự tạo key ngẫu nhiên\n"
                 f"[#ff9ecb]➤[#ffffff] Copy key và paste vào bên dưới\n"
-                f"[#00ffff]➤ Gõ 'doilink' để đổi link lấy key mới[/]",
+                f"[#00ffff]➤ [#ffffff]Gõ [#00ffff]'doilink' [#ffffff]để đổi link lấy key mới[/]\n", 
                 border_style="#a78bfa", 
                 title="[#ff9ecb]LINK LẤY KEY[/]",
                 title_align="center",
                 box=box.DOUBLE,
-                width=46,
-                height=11
+                width=50,
+                height=10
             ))
             console.print("[#ff9ecb]➤ [#ffffff]Nhập Key Vào Đây [#ffffff]hoặc [#00ffff]doilink [#ffffff]để lấy key mới: [#ffffff]", end="")
-            user_input = input().strip().upper()
-            if user_input == "DOILINK":
+            user_input = input().strip().lower()
+            
+            if user_input == "doilink":
                 separator = "&" if "?" in self.key_web else "?"
                 current_url = f"{self.key_web}{separator}t={int(time.time())}"
                 console.print("[#00ffff]  Đang đổi link vượt mới...[/]\n")
                 time.sleep(1)
                 continue
-            user_key = user_input
+            
+            user_key = user_input.upper() if user_input not in ["phonganh", "20032007"] else user_input.lower()
+            
             if not user_key:
                 console.print("[#ff4d6d]  Chưa nhập key![/]")
                 time.sleep(1)
                 continue
+            
             console.print("[#00ffff]  Đang xác thực key...[/]")
             valid, result = self.verify_key(user_key)
             if not valid:
@@ -649,9 +725,12 @@ class LicenseManager:
                 console.print("\n[#888888]Nhấn Enter để thử lại...[/]", end="")
                 input()
                 continue
+            
             if self.save_key_with_data(user_key, result):
-                expiry_str = result.get("expiry", "N/A")
-                if user_key == self.special_key:
+                expiry_str = result.get("expiry", "Vĩnh viễn")
+                
+                # Key admin phonganh
+                if user_key == self.admin_key_phonganh:
                     console.print(Panel(
                         f"[#00ff9c]✓ KÍCH HOẠT KEY ADMIN THÀNH CÔNG![/]\n\n"
                         f"[#ffffff]Key: {user_key}\n"
@@ -662,6 +741,20 @@ class LicenseManager:
                         border_style="#a78bfa",
                         box=box.DOUBLE,
                         title="[#ff9ecb]LICENSE[/]",
+                        title_align="center", 
+                        width=50,
+                        height=10
+                    ))
+                # Key 20032007
+                elif user_key == self.special_key_20032007:
+                    console.print(Panel(
+                        f"[#ff9ecb]✓ KÍCH HOẠT KEY THÀNH CÔNG![/]\n\n"
+                        f"[#ffffff]Key: {user_key}\n"
+                        f"Hạn sử dụng: 5 GIỜ\n"
+                        f"Đã kích hoạt thành công![/]",
+                        border_style="#ff9ecb",
+                        box=box.DOUBLE,
+                        title="[#ff9ecb]LICENSE[/]",
                         title_align="center"
                     ))
                 else:
@@ -670,8 +763,7 @@ class LicenseManager:
                         f"[#00ff9c]✓ KÍCH HOẠT THÀNH CÔNG![/]\n\n"
                         f"[#ffffff]Key: {user_key}\n"
                         f"Hạn sử dụng: {expiry_str}\n"
-                        f"[#00ffff] {msg}[/]\n"
-                        f"Tool sẽ tự động kiểm tra hết hạn mỗi 60 giây[/]",
+                        f"[#00ffff] {msg}[/]\n", 
                         border_style="#a78bfa",
                         box=box.DOUBLE,
                         title="[#ff9ecb]LICENSE[/]",
@@ -713,7 +805,7 @@ def banner():
       \033[38;2;150;230;255m  ░       ░░░ ░ ░ ░  ░  ░       ░      ░ ░ ░ ▒  ░ ░ ░ ▒    ░ ░
       \033[38;2;120;255;230m            ░           ░                  ░ ░      ░ ░      ░  ░
 \033[0m
-\033[38;2;255;200;140m[\033[38;2;245;245;245m</>\033[38;2;255;200;140m] \033[38;2;200;160;255mADMIN:\033[38;2;255;235;180m NHƯ ANH ĐÃ THẤY EM   \033[38;2;255;220;160mPhiên Bản: \033[38;2;120;255;220mv3.1
+\033[38;2;255;200;140m[\033[38;2;245;245;245m</>\033[38;2;255;200;140m] \033[38;2;200;160;255mADMIN:\033[38;2;255;235;180m NHƯ ANH ĐÃ THẤY EM   \033[38;2;255;220;160mPhiên Bản: \033[38;2;120;255;220mv3.13
 \033[38;2;255;200;140m[\033[38;2;245;245;245m</>\033[38;2;255;200;140m] \033[38;2;200;160;255mNhóm Telegram: \033[38;2;120;255;220mhttps://t.me/se_meo_bao_an
 \033[38;2;190;235;210m───────────────────────────────────────────────────────────────────────\033[0m
 """
@@ -722,29 +814,61 @@ def banner():
 
 def get_ip_info():
     try:
+        # Lấy IP bằng ipify
         response = requests.get("https://api.ipify.org?format=json", timeout=6)
         data = response.json()
-        ip_address = data.get('ip', 'Không xác định')
+        ip_address = data.get('ip')
+        
+        if not ip_address:
+            ip_address = "Không xác định"
+            console.print(Text("IP: ", style="#a78bfa") + Text(f"{ip_address} ", style="#ffffff"))
+            return
+            
+        # Lấy thông tin vị trí từ ip-api.com
         try:
             location_response = requests.get(f"http://ip-api.com/json/{ip_address}", timeout=6)
             location_data = location_response.json()
+            
             ip_text = Text()
             ip_text.append("IP: ", style="#a78bfa")
             ip_text.append(f"{ip_address} ", style="#ffffff")
+            
             if location_data.get('status') == 'success':
-                ip_text.append("| TP: ", style="#ff9ecb")
-                ip_text.append(f"{location_data.get('city', 'N/A')} ", style="#ffffff")
-                ip_text.append("| QG: ", style="#00ffff")
-                ip_text.append(f"{location_data.get('countryCode', 'N/A')}", style="#ffffff")
+                city = location_data.get('city')
+                country_code = location_data.get('countryCode')
+                
+                if city:
+                    ip_text.append("| TP: ", style="#ff9ecb")
+                    ip_text.append(f"{city} ", style="#ffffff")
+                else:
+                    ip_text.append("| TP: ", style="#ff9ecb")
+                    ip_text.append("Không rõ ", style="#ffffff")
+                    
+                if country_code:
+                    ip_text.append("| QG: ", style="#00ffff")
+                    ip_text.append(f"{country_code}", style="#ffffff")
+                else:
+                    ip_text.append("| QG: ", style="#00ffff")
+                    ip_text.append("Không rõ", style="#ffffff")
             else:
-                ip_text.append("| Không có thông tin vị trí", style="#ff9ecb")
+                ip_text.append("| TP: ", style="#ff9ecb")
+                ip_text.append("Không rõ ", style="#ffffff")
+                ip_text.append("| QG: ", style="#00ffff")
+                ip_text.append("Không rõ", style="#ffffff")
+                
             console.print(ip_text)
-        except:
+            
+        except Exception:
+            # Fallback khi lỗi lấy vị trí
             ip_text = Text()
             ip_text.append("IP: ", style="#a78bfa")
             ip_text.append(f"{ip_address} ", style="#ffffff")
-            ip_text.append("| Không có thông tin vị trí", style="#ff9ecb")
+            ip_text.append("| TP: ", style="#ff9ecb")
+            ip_text.append("Không rõ ", style="#ffffff")
+            ip_text.append("| QG: ", style="#00ffff")
+            ip_text.append("Không rõ", style="#ffffff")
             console.print(ip_text)
+            
     except Exception:
         console.print("[#ff4d6d]Lỗi lấy IP: Mạng không ổn định hoặc bị chặn.[/]")
 
@@ -761,10 +885,10 @@ def create_menu_table():
     table.add_column("STT", justify="center", style="#00ffff", width=5)
     table.add_column("CHỨC NĂNG", justify="left", width=60)
     modes = [
-        ("1", "[#ffffff]Auto Golike [#ff9ecb]Instagram[/] [#a5f3fc]cookie[/]"),
+        ("1", "[#ffffff]Auto Golike [#ff9ecb]Instagram[/] [#a5f3fc] request [#ffffff][[bold #38bdf8] Mobile + PC[#ffffff] ][/]"),
         ("2", "[#ffffff]Auto Golike [bold #00ffff]TikTok[/] [#ffd54f]ADB[/] [#ffffff]full job[/] [bold #ff9ecb]Like[/] [bold #00ff9c]Follow[/] [bold #38bdf8]Cmt[/] [bold #a78bfa]Favorites[/]"),
-        ("3", "[#ffffff]Auto Golike [bold #38bdf8]Instagram[/] [bold #ff9ecb]selenium[/]"),
-        ("4", "[#ffffff]Tool 4 - Đang phát triển[/]"), 
+        ("3", "[#ffffff]Auto Golike [bold #38bdf8]Instagram[/] [bold #ff9ecb]selenium TERMUX[/] [bold #38bdf8] ưu [/] [bold #a78bfa]tiên[/][/] [bold #00ff9c] chạy termux"),
+        ("4", "[#ffffff]Auto Golike [bold #00ffff]Instagram[/] [#ffd54f]selenium PC[/] [#ffffff][ ưu tiên chạy[/] [bold #ff9ecb]Windows[#ffffff] ][/] [/]"), 
         ("5", "[#ffffff]Tool 5 - Đang phát triển[/]"),
         ("6", "[#ffffff]Tool 6 - Đang phát triển[/]")
     ]
@@ -889,7 +1013,7 @@ RAW_LINKS = {
     "1": "https://raw.githubusercontent.com/Caoquy2k3/Phong-tus/main/ig.py",
     "2": "https://raw.githubusercontent.com/Caoquy2k3/Phong-tus/main/ttnew.py",
     "3": "https://raw.githubusercontent.com/Caoquy2k3/Phong-tus/refs/heads/main/igchrome.py",
-    "4": "https://raw.githubusercontent.com/Caoquy2k3/Phong-tus/main/Igadb.py",
+    "4": "https://raw.githubusercontent.com/Caoquy2k3/Phong-tus/refs/heads/main/igpc.py",
     "5": "https://raw.githubusercontent.com/Caoquy2k3/Phong-tus/main/AdbPinterest.py",
     "6": "https://raw.githubusercontent.com/Caoquy2k3/Phong-tus/main/tool6.py",
     "7": "https://raw.githubusercontent.com/Caoquy2k3/Phong-tus/main/tool7.py",
@@ -903,38 +1027,41 @@ RAW_LINKS = {
 if __name__ == "__main__":
     setup_prompt()
     
-    success, license_manager = check_license_and_run()
-    
-    if not success:
-        sys.exit(1)
-    
     while True:
-        banner()
-        get_ip_info()
+        success, license_manager = check_license_and_run()
         
-        if license_manager:
-            remaining_text = license_manager.get_remaining_display()
-            if remaining_text:
-                console.print(remaining_text)
+        if not success:
+            sys.exit(1)
         
-        loveTCP(5)
-        console.print(create_menu_table())
-        console.print(create_footer())
-
-        console.print("[#ff9ecb]➤[/] [bold #ffffff]Chọn[/] ([#00ffff]0 để thoát[/]): [#ffffff]", end="")
-        choice = input().strip()
-
-        if choice in ("0", "q", "quit", "exit"):
-            console.print("[#888888] Tạm biệt![/]")
+        while True:
+            banner()
+            get_ip_info()
+            
             if license_manager:
-                license_manager.stop_continuous_check()
-            sys.exit(0)
+                remaining_text = license_manager.get_remaining_display()
+                if remaining_text:
+                    console.print(remaining_text)
+            
+            loveTCP(5)
+            console.print(create_menu_table())
+            console.print(create_footer())
 
-        if choice in RAW_LINKS:
-            run_from_raw(RAW_LINKS[choice])
-            clear_screen()
-            console.print("[#888888]Enter để về menu...[/]", end="")
-            input()
-        else:
-            console.print("[#ff4d6d] Số không hợp lệ![/]")
-            time.sleep(1)
+            console.print("[#ff9ecb]➤[/] [bold #ffffff]Chọn[/] ([#00ffff]0 để thoát[/]): [#ffffff]", end="")
+            choice = input().strip()
+
+            if choice in ("0", "q", "quit", "exit"):
+                console.print("[#888888] Tạm biệt![/]")
+                if license_manager:
+                    license_manager.stop_continuous_check()
+                sys.exit(0)
+
+            if choice in RAW_LINKS:
+                run_from_raw(RAW_LINKS[choice])
+                clear_screen()
+                console.print("[#888888]Enter để về menu...[/]", end="")
+                input()
+                # Sau khi chạy tool xong, kiểm tra lại license (có thể key 20032007 đã hết hạn)
+                break
+            else:
+                console.print("[#ff4d6d] Số không hợp lệ![/]")
+                time.sleep(1)
