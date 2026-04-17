@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+
 # -*- coding: utf-8 -*-
 import os
 import sys
@@ -51,7 +52,7 @@ TIKTOK_PACKAGE = "com.ss.android.ugc.trill"
 AUTH_FILE = os.path.join(DATA_DIR, "Authorization.json")
 CONFIG_FILE = os.path.join(DATA_DIR, "config.json")
 GUI_PNG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "gui.png")
-VERSION_CACHE_FILE = os.path.join(DATA_DIR, "tiktok_versions.json")  # Thêm cache version
+VERSION_CACHE_FILE = os.path.join(DATA_DIR, "tiktok_versions.json")
 
 SIMILARITY_THRESHOLD = 0.85
 
@@ -150,39 +151,29 @@ def get_global_session():
             _global_session.mount('http://', adapter)
         return _global_session
 
-# ==================== HÀM LẤY VERSION TIKTOK (THÊM MỚI) ====================
-# Cache version theo serial để tránh gọi nhiều lần
+# ==================== HÀM LẤY VERSION TIKTOK ====================
 _version_cache = {}
 _version_cache_lock = threading.Lock()
 
 def get_tiktok_version_from_device(device_obj, serial=None):
-    """
-    Lấy phiên bản TikTok từ thiết bị đã kết nối
-    Có cache để tránh gọi nhiều lần
-    """
     cache_key = serial if serial else str(id(device_obj))
     
-    # Kiểm tra cache
     with _version_cache_lock:
         if cache_key in _version_cache:
             cached_time, cached_version = _version_cache[cache_key]
-            # Cache trong 60 giây
             if time.time() - cached_time < 60:
                 return cached_version
     
     try:
-        # Thử lấy versionName trước
         result = device_obj.shell("dumpsys package com.ss.android.ugc.trill | grep versionName")
         if result and result.strip():
             match = re.search(r'versionName=([\d.]+)', result)
             if match:
                 version = match.group(1)
-                # Lưu cache
                 with _version_cache_lock:
                     _version_cache[cache_key] = (time.time(), version)
                 return version
         
-        # Nếu không có, thử lấy versionCode
         result = device_obj.shell("pm list packages --show-version-code com.ss.android.ugc.trill")
         if result and result.strip():
             match = re.search(r'versionCode=(\d+)', result)
@@ -197,10 +188,6 @@ def get_tiktok_version_from_device(device_obj, serial=None):
         return None
 
 def get_all_devices_versions(devices_list):
-    """
-    Lấy version TikTok cho tất cả thiết bị cùng lúc
-    Trả về dict {serial: version}
-    """
     versions = {}
     for device in devices_list:
         try:
@@ -211,36 +198,67 @@ def get_all_devices_versions(devices_list):
             versions[getattr(device, 'serial', str(device))] = "Unknown"
     return versions
 
-# ==================== CLASS TIKTOK BOT ====================
+# ==================== HÀM WAIT UI THẬT ====================
+def wait_tiktok_ui(device, timeout=20):
+    """
+    Chờ UI TikTok thật sự load xong
+    Nếu quá timeout thì trả về False để xử lý
+    """
+    start_time = time.time()
+    while time.time() - start_time < timeout:
+        try:
+            current = device.app_current()
+            if current.get("package") == TIKTOK_PACKAGE:
+                xml = device.dump_hierarchy()
+                if xml and len(xml) > 1000:
+                    return True
+        except:
+            pass
+        time.sleep(0.5)
+    return False
+
+def force_restart_tiktok(device):
+    """Buộc dừng và khởi động lại TikTok"""
+    try:
+        device.app_stop(TIKTOK_PACKAGE)
+        time.sleep(1)
+        device.app_start(TIKTOK_PACKAGE)
+        wait_tiktok_ui(device, timeout=15)
+    except Exception as e:
+        pass
+
 class TikTokBot:
-    
-    def __init__(self, serial, auth_token, golike_username, account_id_val, delay_config, lam, 
-                 force_stop_enabled, force_stop_after, min_follow_price):
+
+    def __init__(self, serial, auth_token, golike_username, account_id_val,
+                 delay_config, lam, force_stop_enabled, force_stop_after,
+                 min_follow_price):
+
         self.serial = serial
         self.auth_token = auth_token
         self.golike_username = golike_username
         self.account_id_val = account_id_val
-        self.delay_config = delay_config
+
+        self.delay_config = delay_config or {}
         self.lam = lam
         self.force_stop_enabled = force_stop_enabled
         self.force_stop_after = force_stop_after
         self.min_follow_price = min_follow_price
-        
         self.device = None
+        self.stop_flag = False
         self.job_count = 0
         self.previous_job_link = None
-        self.stop_flag = False
-        
         self.consecutive_errors = 0
-        self.retry_delays = [5, 10, 30, 60, 120]
-        
-        self.ui_dump_cache = {"xml": "", "timestamp": 0, "nodes": []}
-        self.ui_dump_cache_ttl = 0.8
-        self.last_dump_time = 0
-        self.min_dump_interval = 0.3
-        
+        self.max_errors = 5
+        self._ui_lock = threading.Lock()
+        self.ui_xml = ""
+        self.ui_timestamp = 0
+        self.ui_ttl = 0.4   # giảm TTL để tránh đọc UI cũ
+
+        self.last_action_time = 0
+        self.min_action_gap = 0.25
+
         self.session = get_global_session()
-        
+
         self.headers = {
             'Accept-Language': 'vi,en-US;q=0.9,en;q=0.8',
             'Referer': 'https://app.golike.net/',
@@ -256,24 +274,124 @@ class TikTokBot:
             'Content-Type': 'application/json;charset=utf-8',
             'Connection': 'keep-alive'
         }
-        
+
         self.logger = None
         self.link_job_file = None
         self.check_cmt_file = None
-        self._init_instance_files()
-        
+
         self.last_comment = None
         self.job_counter_since_restart = 0
         self.error_counter_since_restart = 0
         self.last_restart_time = 0
         self.last_adb_check_time = 0
-        self.adb_reset_count = 0
-        
+
         self.processed_videos = self._load_processed_videos()
         self.tiktok_version = None
+
+        self._init_instance_files()
+
+    def ensure_device(self):
+        try:
+            if not self.device:
+                return False
+
+            # ping thật UI (QUAN TRỌNG)
+            _ = self.device.info
+            self.consecutive_errors = 0
+            return True
+
+        except:
+            self.consecutive_errors += 1
+            return False
+
+    def get_ui(self):
+        now = time.time()
+
+        # nếu UI còn mới → dùng
+        if self.ui_xml and (now - self.ui_timestamp < self.ui_ttl):
+            return self.ui_xml
+
+        with self._ui_lock:
+            try:
+                if not self.ensure_device():
+                    return ""
+
+                xml = self.device.dump_hierarchy()
+
+                # UPDATE UI NGAY LẬP TỨC (fix miss UI state)
+                self.ui_xml = xml
+                self.ui_timestamp = now
+
+                return xml
+
+            except:
+                self.consecutive_errors += 1
+                return ""
+
+    def find_ui(self, keyword):
+        """
+        đọc UI thật -> tránh click sai screen
+        """
+        xml = self.get_ui()
+
+        if not xml:
+            return False
+
+        return keyword in xml
+
+    def smart_click(self, selector=None, x=None, y=None, verify_keyword=None):
+
+        now = time.time()
+
+        # chống lệch nhịp UI
+        if now - self.last_action_time < self.min_action_gap:
+            time.sleep(self.min_action_gap)
+
+        if not self.ensure_device():
+            return False
+
+        try:
+            # ================= CLICK =================
+            if selector:
+                if selector.exists(timeout=1.2):
+                    selector.click()
+                else:
+                    return False
+
+            elif x is not None and y is not None:
+                self.device.click(x, y)
+
+            else:
+                return False
+
+            # ================= SYNC UI (QUAN TRỌNG NHẤT) =================
+            time.sleep(self.delay_config.get("after_click", 0.4))
+
+            # refresh UI ngay sau click → FIX MISS
+            self.ui_xml = self.device.dump_hierarchy()
+            self.ui_timestamp = time.time()
+
+            # ================= VERIFY STATE =================
+            if verify_keyword:
+                if verify_keyword not in self.ui_xml:
+                    # UI chưa đổi → coi như miss
+                    return False
+
+            self.last_action_time = time.time()
+            self.consecutive_errors = 0
+
+            return True
+
+        except:
+            self.consecutive_errors += 1
+            return False
+
+    def reset(self):
+        self.device = None
+        self.consecutive_errors = 0
+        time.sleep(1)
     
     def _get_tiktok_version(self):
-        """Lấy phiên bản TikTok thực tế từ thiết bị"""
         return get_tiktok_version_from_device(self.device, self.serial)
     
     def _update_dashboard_with_version(self):
@@ -356,7 +474,7 @@ class TikTokBot:
     def _update_dashboard_status(self, status, job_type=None):
         with dashboard_lock:
             if self.account_id_val in accounts_data:
-                accounts_data[self.account_id_val]["status"] = status[:80] if len(status) > 80 else status
+                accounts_data[self.account_id_val]["status"] = status[:120] if len(status) > 120 else status
                 accounts_data[self.account_id_val]["last_message"] = status
                 accounts_data[self.account_id_val]["message_time"] = get_vn_time().strftime('%H:%M:%S')
                 accounts_data[self.account_id_val]["last_update"] = time.time()
@@ -389,24 +507,8 @@ class TikTokBot:
     def _add_response_message(self, msg, job_type=None):
         self._update_dashboard_status(msg, job_type)
     
-    def _reset_adb_server_if_needed(self):
-        if self.adb_reset_count > 0:
-            return
-        
-        try:
-            result = subprocess.run(['adb', 'devices'], capture_output=True, text=True, timeout=5)
-            if "unauthorized" in result.stdout.lower() or "offline" in result.stdout.lower():
-                self._add_response_message("ADB: Phát hiện ADB treo, đang reset...")
-                subprocess.run(['adb', 'kill-server'], timeout=5)
-                time.sleep(2)
-                subprocess.run(['adb', 'start-server'], timeout=5)
-                time.sleep(2)
-                self.adb_reset_count += 1
-                self._add_response_message("ADB: Reset ADB server hoàn tất")
-        except Exception:
-            pass
-    
     def _check_and_reconnect_adb(self):
+        """Kiểm tra kết nối ADB, KHÔNG kill-server/reset, chỉ kết nối lại u2"""
         now = time.time()
         if now - self.last_adb_check_time < 30:
             return True
@@ -418,7 +520,7 @@ class TikTokBot:
                 self.device.info
                 return True
         except Exception:
-            self._reset_adb_server_if_needed()
+            pass
         
         try:
             self.device = u2.connect(self.serial)
@@ -500,7 +602,7 @@ class TikTokBot:
             self.device.app_stop(TIKTOK_PACKAGE)
             time.sleep(0.8)
             self.device.app_start(TIKTOK_PACKAGE)
-            time.sleep(2)
+            wait_tiktok_ui(self.device, timeout=10)
         except Exception:
             pass
     
@@ -509,7 +611,7 @@ class TikTokBot:
             current = self.device.app_current()
             if current.get("package") != TIKTOK_PACKAGE:
                 self.device.app_start(TIKTOK_PACKAGE)
-                time.sleep(2)
+                wait_tiktok_ui(self.device, timeout=10)
                 return False
             return True
         except Exception:
@@ -522,16 +624,14 @@ class TikTokBot:
                 return False
             cmd = u'am start -a android.intent.action.VIEW -d "{}" {}'.format(link, TIKTOK_PACKAGE)
             self.device.shell(cmd)
-            launched = self.device.app_wait(TIKTOK_PACKAGE, timeout=6)
-            if launched:
-                self._wait_for_ui_stable(wait_time=1.2)
+            launched = wait_tiktok_ui(self.device, timeout=8)
             return launched
         except Exception:
             if self._check_and_reconnect_adb():
                 try:
                     cmd = u'am start -a android.intent.action.VIEW -d "{}" {}'.format(link, TIKTOK_PACKAGE)
                     self.device.shell(cmd)
-                    return self.device.app_wait(TIKTOK_PACKAGE, timeout=6)
+                    return wait_tiktok_ui(self.device, timeout=8)
                 except:
                     pass
             return False
@@ -1243,129 +1343,7 @@ class TikTokBot:
         except Exception as e:
             return False, str(e), None, 0
     
-    # ==================== LẤY USERNAME ====================
-    
-    def _wait_for_element(self, selectors, timeout=15, interval=0.5):
-        start_time = time.time()
-        while time.time() - start_time < timeout:
-            if self.stop_flag or is_stop_all():
-                return None
-            for selector in selectors:
-                try:
-                    if self.device(**selector).exists(timeout=0.5):
-                        return selector
-                except:
-                    pass
-            time.sleep(interval)
-        return None
-
-    def _wait_for_any_element(self, elements_list, timeout=15):
-        start_time = time.time()
-        while time.time() - start_time < timeout:
-            if self.stop_flag or is_stop_all():
-                return None
-            for element in elements_list:
-                try:
-                    if self.device(**element).exists(timeout=0.3):
-                        return element
-                except:
-                    pass
-            time.sleep(0.3)
-        return None
-
-    def _open_profile_by_deeplink(self):
-        try:
-            deeplink_url = "tiktok://user/profile"
-            cmd = f'am start -a android.intent.action.VIEW -d "{deeplink_url}" {TIKTOK_PACKAGE}'
-            self.device.shell(cmd)
-            time.sleep(1.5)
-            return True
-        except Exception as e:
-            self._add_response_message(u"Lỗi deeplink: {}".format(str(e)))
-            return False
-
-    def _get_username_from_xml(self, xml_content):
-        match = re.search(r'text="(@[a-zA-Z0-9_\.]+)"', xml_content)
-        if match:
-            return match.group(1).replace("@", "")
-        
-        match = re.search(r'content-desc="([^"]*@[a-zA-Z0-9_\.]+)"', xml_content)
-        if match:
-            username = match.group(1)
-            at_match = re.search(r'@([a-zA-Z0-9_\.]+)', username)
-            if at_match:
-                return at_match.group(1)
-        
-        match = re.search(r'text="([a-zA-Z0-9_]{3,30})"', xml_content)
-        if match:
-            candidate = match.group(1)
-            if candidate.lower() not in ['home', 'feed', 'video', 'like', 'share', 'comment', 'for you']:
-                return candidate
-        
-        return None
-
-    def _click_username_by_dump(self):
-        try:
-            if not self._check_app_status():
-                self._restart_tiktok()
-                time.sleep(2)
-            
-            self._add_response_message(u"Mở Profile...")
-            if not self._open_profile_by_deeplink():
-                w, h = self.device.window_size()
-                self.device.click(int(w * 0.5), int(h * 0.12))
-                time.sleep(1)
-            
-            self._add_response_message(u"Chờ profile load...")
-            time.sleep(2)
-            
-            xml_content = self.device.dump_hierarchy()
-            username = self._get_username_from_xml(xml_content)
-            
-            if username and len(username) > 1:
-                self._add_response_message(u"Username: @{}".format(username))
-                return username.lower()
-            
-            return None
-            
-        except Exception as e:
-            self._add_response_message(u"Lỗi: {}".format(str(e)))
-            return None
-
-    def _get_tiktok_username(self, max_retry=3):
-        self._add_response_message(u"Lấy username TikTok...")
-        
-        if self.stop_flag or is_stop_all():
-            return None
-        
-        if not self._check_app_status():
-            self._restart_tiktok()
-            time.sleep(2)
-        
-        self._add_response_message(u"Chờ feed load...")
-        time.sleep(2)
-        
-        for attempt in range(max_retry):
-            if self.stop_flag or is_stop_all():
-                return None
-            
-            if attempt > 0:
-                self._add_response_message(u"Thử lần {}/{}...".format(attempt + 1, max_retry))
-                self.device.press("back")
-                time.sleep(0.5)
-                self.device.press("back")
-                time.sleep(0.5)
-            
-            username = self._click_username_by_dump()
-            
-            if username and len(username) > 1:
-                return username
-            
-            if attempt < max_retry - 1:
-                time.sleep(2)
-        
-        self._add_response_message(u"Hết lần thử - Không lấy được username")
-        return None
+    # ==================== HÀM LẤY USERNAME LÌ LỢM (20s + FORCE STOP) ====================
     
     def _force_stop_tiktok(self):
         if self.stop_flag or is_stop_all():
@@ -1407,6 +1385,152 @@ class TikTokBot:
             return True
         else:
             return False
+    
+    def _click_username_by_dump(self):
+        """Hàm quét username từ XML sau khi đã vào profile"""
+        try:
+            # Dùng Deep Link để vào thẳng profile
+            deeplink_url = "tiktok://user/profile"
+            self.device.shell(f'am start -a android.intent.action.VIEW -d "{deeplink_url}" {TIKTOK_PACKAGE}')
+            time.sleep(2)
+
+            start_scan = time.time()
+            while time.time() - start_scan < 8:
+                if self.stop_flag or is_stop_all():
+                    return None
+                
+                xml = self.device.dump_hierarchy()
+                if not xml:
+                    continue
+
+                match = re.search(r'text="(@[a-zA-Z0-9_\.]+)"', xml)
+                if match:
+                    username = match.group(1).replace("@", "").strip().lower()
+                    if len(username) > 2 and len(username) < 50:
+                        return username
+                
+                exclude = ['home', 'feed', 'video', 'like', 'share', 'comment', 'for you', 
+                          'following', 'inbox', 'profile', 'settings', 'message', 'notification']
+                matches = re.findall(r'text="([a-zA-Z0-9_]{4,30})"', xml)
+                for m in matches:
+                    u = m.lower()
+                    if u not in exclude and not any(k in u for k in exclude):
+                        if len(u) > 2 and len(u) < 50:
+                            return u
+                time.sleep(1)
+            return None
+        except Exception as e:
+            self._add_response_message(u"Lỗi quét username: {}".format(str(e)[:50]))
+            return None
+    
+    def _get_username_persistent_loop(self):
+        """Lấy username không giới hạn: Đợi 20s -> Force Stop -> Làm lại"""
+        attempt = 1
+        while not self.stop_flag and not is_stop_all():
+            self._update_dashboard_status(u"Quét Username lần {}...".format(attempt))
+            
+            self.device.app_start(TIKTOK_PACKAGE)
+            
+            start_wait = time.time()
+            ui_ready = False
+            while time.time() - start_wait < 20:
+                if self.stop_flag or is_stop_all():
+                    return None
+                try:
+                    current = self.device.app_current()
+                    if current.get("package") == TIKTOK_PACKAGE:
+                        xml = self.device.dump_hierarchy()
+                        if xml and len(xml) > 1000:
+                            ui_ready = True
+                            break
+                except:
+                    pass
+                time.sleep(0.5)
+
+            if ui_ready:
+                username = self._click_username_by_dump()
+                if username and len(username) > 2:
+                    self._add_response_message(u"✓ Đã lấy username: @{}".format(username))
+                    return username
+                self._add_response_message(u"Không tìm thấy tên trên màn hình...")
+            else:
+                self._add_response_message(u"Quá 20s app không load. Buộc dừng ngay!")
+
+            self._force_stop_tiktok()
+            time.sleep(1.5)
+            attempt += 1
+        return None
+    
+    # ==================== HÀM ADD TÀI KHOẢN (TỰ ĐỘNG XỬ LÝ FOLLOW XÁC MINH) ====================
+    
+    def verify_account_logic_new(self, username):
+        """Logic xác thực tài khoản - xử lý mã lỗi và tự động trích xuất link follow"""
+        url = "https://gateway.golike.net/api/tiktok-account/verify-account-id"
+        username = username.replace('@', '').strip()
+        payload = {"unique_id": username}
+        
+        try:
+            res = self.session.post(url, headers=self.headers, json=payload, timeout=25)
+            data = res.json()
+
+            if isinstance(data, list):
+                msg_error = data[0] if len(data) > 0 else u"Lỗi API"
+                return False, msg_error, None, None
+
+            message = data.get("message") or data.get("msg") or u"Lỗi xác thực"
+            target_data = data.get("data", {})
+            if not isinstance(target_data, dict):
+                target_data = {}
+
+            found_links = re.findall(r'https://www.tiktok.com/@[a-zA-Z0-9._]+', message)
+            target_follow = target_data.get("is_follow_id")
+            follow_link = found_links[0] if found_links else (f"https://www.tiktok.com/@{target_follow}" if target_follow else None)
+
+            if res.status_code == 200:
+                account_id = target_data.get("id")
+                if account_id:
+                    return True, message, account_id, follow_link
+            
+            return False, message, None, follow_link
+        except Exception as e:
+            return False, u"Lỗi: {}".format(str(e)), None, None
+    
+    def auto_setup_account(self):
+        """Quy trình: Quét Username -> Add Acc -> Trả về ID và username"""
+        auto_username = self._get_username_persistent_loop()
+        if not auto_username:
+            return None, None
+
+        self._add_response_message(u"Kiểm tra acc trên hệ thống...")
+        chontiktok = self._chonacc()
+        for acc in chontiktok.get("data", []):
+            if acc.get("unique_username", "").strip().lower() == auto_username:
+                self._add_response_message(u"Tài khoản @{} đã sẵn sàng.".format(auto_username))
+                return acc.get("id"), auto_username
+
+        self._add_response_message(u"Đang Add tài khoản @{}...".format(auto_username))
+        ok, msg, acc_id, target_link = self.verify_account_logic_new(auto_username)
+
+        if not ok and target_link:
+            self._add_response_message(u"Đang follow link xác minh: {}".format(target_link))
+            if self._open_link(target_link):
+                time.sleep(1.5)
+                if self.do_follow():
+                    self._add_response_message(u"Follow xác minh thành công!")
+                    time.sleep(2)
+                    ok, msg, acc_id, _ = self.verify_account_logic_new(auto_username)
+                    self.device.press("back") 
+                else:
+                    self._add_response_message(u"Follow xác minh thất bại!")
+            else:
+                self._add_response_message(u"Không thể mở link xác minh!")
+
+        if ok and acc_id:
+            self._add_response_message(u"✓ Add thành công! ID: {}".format(acc_id))
+            return acc_id, auto_username
+        
+        self._add_response_message(u"✗ Add thất bại: {}".format(msg))
+        return None, None
     
     # ==================== HÀM CHẠY CHÍNH ====================
     
@@ -1454,17 +1578,6 @@ class TikTokBot:
                     del accounts_data[temp_account_id]
             return
         
-        self._add_response_message(u"Đang lấy danh sách tài khoản Golike...")
-        chontiktok = self._chonacc()
-        if chontiktok.get("status") != 200:
-            self._add_response_message(u"Lấy danh sách tài khoản Golike thất bại: {}".format(chontiktok.get("message")))
-            with dashboard_lock:
-                if temp_account_id in accounts_data:
-                    del accounts_data[temp_account_id]
-            return
-        
-        self._add_response_message(u"Đã lấy danh sách {} tài khoản".format(len(chontiktok.get("data", []))))
-        
         if self.force_stop_enabled:
             self._add_response_message(u"Đang force stop TikTok...")
             self._force_stop_tiktok()
@@ -1473,51 +1586,51 @@ class TikTokBot:
         self._add_response_message(u"Đang mở TikTok...")
         self._start_tiktok_and_wait()
         
-        auto_username = self._get_tiktok_username(max_retry=3)
+        # ==================== QUY TRÌNH AUTO SETUP TÀI KHOẢN ====================
+        final_account_id, auto_username = self.auto_setup_account()
         
-        if not auto_username:
-            self._add_response_message(u"Không thể lấy username TikTok")
+        if not final_account_id or not auto_username:
+            self._add_response_message(u"Không thể thiết lập tài khoản. Dừng luồng.")
             with dashboard_lock:
                 if temp_account_id in accounts_data:
                     del accounts_data[temp_account_id]
+                if self.account_id_val in accounts_data:
+                    del accounts_data[self.account_id_val]
             return
         
-        self._add_response_message(u"Đang tìm account_id cho @{}...".format(auto_username))
-        account_id_found = None
-        for acc in chontiktok.get("data", []):
-            if acc.get("unique_username", "").strip().lower() == auto_username:
-                account_id_found = acc.get("id")
-                break
+        self.account_id_val = final_account_id
         
-        if not account_id_found:
-            self._add_response_message(u"Username @{} không có trong danh sách Golike".format(auto_username))
-            with dashboard_lock:
-                if temp_account_id in accounts_data:
-                    del accounts_data[temp_account_id]
-            return
-        
-        self._add_response_message(u"Tìm thấy account_id: {}".format(account_id_found))
-        
+        # Cập nhật dashboard với username thật
         with dashboard_lock:
-            temp_data = accounts_data.pop(temp_account_id, {})
-            self.account_id_val = account_id_found
-            accounts_data[account_id_found] = {
-                "username": auto_username,
-                "status": u"Sẵn sàng",
-                "last_message": u"Đã xác thực @{}".format(auto_username),
-                "message_time": get_vn_time().strftime('%H:%M:%S'),
-                "job_type": "",
-                "xu": 0,
-                "total_xu": temp_data.get("total_xu", 0),
-                "done": temp_data.get("done", 0),
-                "fail": temp_data.get("fail", 0),
-                "link": "",
-                "device_serial": self.serial,
-                "last_update": time.time(),
-                "last_success": time.time(),
-                "tiktok_version": self.tiktok_version
-            }
+            if final_account_id in accounts_data:
+                accounts_data[final_account_id]["username"] = auto_username
+                accounts_data[final_account_id]["status"] = u"Sẵn sàng"
+                accounts_data[final_account_id]["last_message"] = u"Đã xác thực @{}".format(auto_username)
+                accounts_data[final_account_id]["tiktok_version"] = self.tiktok_version
+                accounts_data[final_account_id]["last_update"] = time.time()
+            else:
+                accounts_data[final_account_id] = {
+                    "username": auto_username,
+                    "status": u"Sẵn sàng",
+                    "last_message": u"Đã xác thực @{}".format(auto_username),
+                    "message_time": get_vn_time().strftime('%H:%M:%S'),
+                    "job_type": "",
+                    "xu": 0,
+                    "total_xu": 0,
+                    "done": 0,
+                    "fail": 0,
+                    "link": "",
+                    "device_serial": self.serial,
+                    "last_update": time.time(),
+                    "last_success": time.time(),
+                    "tiktok_version": self.tiktok_version
+                }
+            
+            # Xóa temp account nếu có
+            if temp_account_id in accounts_data:
+                del accounts_data[temp_account_id]
         
+        # Nuôi nick khởi động
         num_videos_khoi_dong = self.delay_config.get('nuoi_nick', 2)
         share_rate = self.delay_config.get('share_rate', 15)
         if num_videos_khoi_dong > 0:
@@ -1526,6 +1639,7 @@ class TikTokBot:
         
         self._reset_retry_counter()
         
+        # ==================== VÒNG LẶP LÀM JOB ====================
         while not self.stop_flag and not is_stop_all():
             try:
                 self._update_dashboard_status(u"Đang tìm nhiệm vụ...")
@@ -1577,7 +1691,7 @@ class TikTokBot:
                         self._update_dashboard_stats(data["type"], job_price, success=True)
                         self._add_response_message(u"{} - Giá: {} xu".format(reason, job_price))
                         
-                        delay_time_done = self.delay_config.get('delay_done', 5)
+                        delay_time_done = self.delay_config.get('delay_done', 9)
                         share_rate_normal = self.delay_config.get('share_rate', 15)
                         
                         if delay_time_done > 0:
@@ -1636,7 +1750,8 @@ def banner():
       \033[38;2;150;230;255m  ░       ░░░ ░ ░ ░  ░  ░       ░      ░ ░ ░ ▒  ░ ░ ░ ▒    ░ ░
       \033[38;2;120;255;230m            ░           ░                  ░ ░      ░ ░      ░  ░
 \033[0m
-\033[38;2;255;200;140m[</>] \033[38;2;200;160;255mADMIN: NHƯ ANH ĐÃ THẤY EM   \033[38;2;255;220;160mPhiên Bản: \033[38;2;120;255;220mv4.5-FINAL
+
+\033[38;2;255;200;140m[</>] \033[38;2;200;160;255mADMIN: NHƯ ANH ĐÃ THẤY EM   \033[38;2;255;220;160mPhiên Bản: \033[38;2;120;255;220mv4.6-FIXED
 \033[38;2;255;200;140m[</>] \033[38;2;200;160;255mNhóm Telegram: \033[38;2;120;255;220mhttps://t.me/se_meo_bao_an
 \033[38;2;190;235;210m───────────────────────────────────────────────────────────────────────\033[0m
 """
@@ -1934,9 +2049,6 @@ def get_battery_from_adb(device_obj):
     return ""
 
 
-# ĐÃ CHUYỂN HÀM get_tiktok_version_from_device LÊN TRÊN (phần đầu file)
-
-
 def show_devices_with_rich(multi_select=True):
     console.clear()
     banner()
@@ -1961,7 +2073,6 @@ def show_devices_with_rich(multi_select=True):
         console.print(Panel(u"[red]Không tìm thấy thiết bị ADB nào![/]", border_style="red"))
         return []
 
-    # Lấy version cho tất cả thiết bị cùng lúc
     versions = get_all_devices_versions(devices)
 
     for i, d in enumerate(devices):
@@ -2233,8 +2344,8 @@ def build_dashboard_table():
     table.add_column("STT", justify="center", style="#ffd54f", width=4)
     table.add_column("Device", style="#a78bfa", width=20)
     table.add_column("usname", style="#00ffff", width=14)
-    table.add_column("Version", style="#ff9ecb", width=8)  # Đổi từ Status sang Version
-    table.add_column("Status", style="#ffffff", width=50)  # Thu hẹp lại
+    table.add_column("Version", style="#ff9ecb", width=8)
+    table.add_column("Status", style="#ffffff", width=50)
     table.add_column("Type", style="#38bdf8", width=8)
     table.add_column(u"Xu", style="#ff9ecb", width=5)
     table.add_column(u"Tổng", style="#facc15", width=6)
@@ -2287,13 +2398,10 @@ def make_dashboard_layout():
 
     layout = Layout()
     
-    # Tính gap bottom tự động dựa trên chiều cao console
     try:
         console_height = console.height
-        # Gap bottom = tổng chiều cao console - (title 3 + stats 4 + số dòng table)
-        # Lấy số dòng table tạm thời
         with dashboard_lock:
-            row_count = len(accounts_data) + 2  # +2 cho header
+            row_count = len(accounts_data) + 2
         table_rows = min(row_count, console_height - 10)
         le_duoi = max(0, console_height - 7 - table_rows - chieu_cao_stats)
     except:
@@ -2341,28 +2449,22 @@ def make_dashboard_layout():
 
 
 def run_dashboard():
-    # Giảm mức ưu tiên CPU cho luồng Dashboard
     if hasattr(os, 'nice'):
         try: os.nice(10)
         except: pass
     
-    # 1. Tắt screen=True (để False hoặc xóa đi) -> Hết nháy màn hình
-    # 2. Giữ refresh_per_second thấp (1.0 - 2.0) -> Cực kỳ ổn định
     with Live(
         make_dashboard_layout(),
         refresh_per_second=1.0, 
-        screen=False, # Quan trọng: Để False để không bị clear màn hình
+        screen=False,
         auto_refresh=True
     ) as live:
         while not is_stop_all():
             try:
-                # Chỉ cần update layout mới, không cần check size thủ công
-                # Vì Grid và Fixed Width sẽ tự giữ khung chuẩn
                 live.update(make_dashboard_layout())
-                time.sleep(1) # Nghỉ 1s update 1 lần là quá đủ cho Box Phone
+                time.sleep(1)
             except Exception:
                 time.sleep(1)
-
 
 
 # ==================== MAIN ====================
@@ -2379,22 +2481,17 @@ if __name__ == "__main__":
     
     banner()
     
-    # TẢI GUI.PNG VÀO RAM
     load_gui_template_once()
     
-    # Chọn Authorization Golike
     auth_token = display_auth_menu()
     console.print(u"✓ Đã chọn Authorization")
     time.sleep(1)
     
-    # Cấu hình delay
     console.print(u"[yellow] CẤU HÌNH DELAY VÀ THÔNG SỐ[/]")
     delay_config, min_follow_price, force_stop_enabled, force_stop_after = setup_delay_config()
     
-    # Chọn nhiệm vụ
     lam = menu_jobs()
     
-    # Chọn thiết bị
     console.print(u"[yellow]Tiến hành kết nối thiết bị ADB...[/]")
     
     selected_serials = select_devices()
@@ -2406,12 +2503,10 @@ if __name__ == "__main__":
     console.print(u"✓ Đã chọn {} thiết bị để chạy song song".format(len(selected_serials)))
     time.sleep(2)
     
-    # Khởi tạo dashboard
     dashboard_thread = threading.Thread(target=run_dashboard, daemon=True)
     dashboard_thread.start()
     time.sleep(2)
     
-    # Chạy đa luồng
     console.print(u"[bold green] BẮT ĐẦU CHẠY {} THIẾT BỊ SONG SONG[/]".format(len(selected_serials)))
     
     def run_worker(serial):
