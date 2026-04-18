@@ -1392,7 +1392,7 @@ class TikTokBot:
             # Dùng Deep Link để vào thẳng profile
             deeplink_url = "tiktok://user/profile"
             self.device.shell(f'am start -a android.intent.action.VIEW -d "{deeplink_url}" {TIKTOK_PACKAGE}')
-            time.sleep(20)
+            time.sleep(2)
 
             start_scan = time.time()
             while time.time() - start_scan < 8:
@@ -1431,21 +1431,27 @@ class TikTokBot:
             
             self.device.app_start(TIKTOK_PACKAGE)
             
-            start_wait = time.time()
+            start = time.time()
+            stable = 0
             ui_ready = False
-            while time.time() - start_wait < 20:
+
+            while time.time() - start < 20:
                 if self.stop_flag or is_stop_all():
                     return None
+
                 try:
-                    current = self.device.app_current()
-                    if current.get("package") == TIKTOK_PACKAGE:
-                        xml = self.device.dump_hierarchy()
-                        if xml and len(xml) > 1000:
+                    if self.device(textMatches="@.{3,30}").exists:
+                        stable += 1
+                        if stable >= 2:   # UI ổn định 2 lần liên tiếp
                             ui_ready = True
                             break
+                    else:
+                        stable = 0
+
                 except:
                     pass
-                time.sleep(0.5)
+
+                time.sleep(0.3)
 
             if ui_ready:
                 username = self._click_username_by_dump()
