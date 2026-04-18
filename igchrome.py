@@ -1392,7 +1392,7 @@ class TikTokBot:
             # Dùng Deep Link để vào thẳng profile
             deeplink_url = "tiktok://user/profile"
             self.device.shell(f'am start -a android.intent.action.VIEW -d "{deeplink_url}" {TIKTOK_PACKAGE}')
-            time.sleep(2)
+            time.sleep(20)
 
             start_scan = time.time()
             while time.time() - start_scan < 8:
