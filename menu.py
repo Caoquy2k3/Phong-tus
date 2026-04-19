@@ -50,7 +50,7 @@ def banner():
     console.print(Panel(
         f"[#ff4d6d] PHIÊN BẢN ĐÃ CŨ - TOOL BỊ KHÓA![/]\n\n"
         f"[#ffffff]Phiên bản này đã ngừng hoạt động để đảm bảo an toàn.\n"
-        f"Bạn bắt buộc phải tải lại bản update mới nhất.legram TOOL TÊN tustool3.13.py\n\n"
+        f"Bạn bắt buộc phải tải lại bản update TOOL TÊN tustool3.13.py mới nhất.legram\n\n"
         f"[#ff9ecb]👉 Lấy link tải bản mới tại nhóm Telegram:[/]\n"
         f"[bold #00ffff]➤ https://t.me/se_meo_bao_an[/]\n\n"
         f"[#888888](Vui lòng copy link trên và dán vào trình duyệt hoặc Telegram TOOL TÊN tustool3.13.py)[/]",
