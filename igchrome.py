@@ -1,2171 +1,89 @@
 #!/usr/bin/env python3
-
 # -*- coding: utf-8 -*-
 import os
 import sys
 import time
 import json
 import requests
-from datetime import datetime, timezone, timedelta
-import subprocess
-import uiautomator2 as u2
-import random
-import logging
-from logging.handlers import RotatingFileHandler
 import re
-from difflib import SequenceMatcher
-import hashlib
+from datetime import datetime, timezone
+import random
+import urllib3
 import threading
+from queue import Queue
+from collections import defaultdict
+import urllib.parse
+import subprocess
+
+# THÊM IMPORT CHO RICH
 from rich.console import Console
 from rich.table import Table
-from rich.panel import Panel
-from rich.align import Align
 from rich.live import Live
-from rich.layout import Layout
 from rich import box
+from rich.panel import Panel
 from rich.text import Text
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from adbutils import adb
-import cv2
-import numpy as np
-import urllib.request
-import signal
-import gc
-from collections import deque
+from rich.layout import Layout
+from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn
+from rich.align import Align
+from rich.console import Group
 
-# ==================== CẤU HÌNH MÚI GIỜ VIỆT NAM CHUẨN ====================
-os.environ['TZ'] = 'Asia/Ho_Chi_Minh'
-if hasattr(time, 'tzset'):
-    time.tzset()
+# THÊM IMPORT CHO SELENIUM
+from selenium import webdriver
+from selenium.webdriver.common.by import By
+from selenium.webdriver.common.keys import Keys
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.common.exceptions import TimeoutException, NoSuchElementException, WebDriverException, SessionNotCreatedException
+from selenium.webdriver.chrome.service import Service
+from selenium.webdriver.chrome.options import Options
 
-VN_TZ = timezone(timedelta(hours=7))
+# Disable warnings SSL (chỉ cho Golike API)
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-def get_vn_time():
-    return datetime.now(VN_TZ)
-
-# ==================== CẤU HÌNH TOÀN CỤC ====================
-DATA_DIR = "data"
-os.makedirs(DATA_DIR, exist_ok=True)
-
-TIKTOK_PACKAGE = "com.ss.android.ugc.trill"
-
-AUTH_FILE = os.path.join(DATA_DIR, "Authorization.json")
-CONFIG_FILE = os.path.join(DATA_DIR, "config.json")
-GUI_PNG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "gui.png")
-VERSION_CACHE_FILE = os.path.join(DATA_DIR, "tiktok_versions.json")
-
-SIMILARITY_THRESHOLD = 0.85
-
-DEFAULT_DELAY_CONFIG = {
-    'like': [5, 5],
-    'follow': [5, 5],
-    'comment': [5, 5],
-    'favorite': [5, 5],
-    'job': [5, 5],
-    'delay_done': 9,
-    'loc_follow': 0,
-    'nuoi_nick': 2,
-    'share_rate': 15
-}
-
-# ==================== DASHBOARD TOÀN CỤC ====================
 console = Console()
-accounts_data = {}
-dashboard_lock = threading.Lock()
-stop_all_threads = False
-stop_lock = threading.Lock()
 
-def set_stop_all():
-    global stop_all_threads
-    with stop_lock:
-        stop_all_threads = True
-
-def clear_stop_all():
-    global stop_all_threads
-    with stop_lock:
-        stop_all_threads = False
-
-def is_stop_all():
-    with stop_lock:
-        return stop_all_threads
-
-# ==================== OPENCY TEMPLATE ====================
-GUI_TEMPLATE = None
-GUI_TEMPLATE_LOCK = threading.Lock()
-
-def load_gui_template_once():
-    global GUI_TEMPLATE
-    with GUI_TEMPLATE_LOCK:
-        if GUI_TEMPLATE is not None:
-            return True
-        
-        if os.path.exists(GUI_PNG_PATH):
-            try:
-                GUI_TEMPLATE = cv2.imread(GUI_PNG_PATH)
-                if GUI_TEMPLATE is not None:
-                    console.print("✓ Đã load gui.png vào RAM ({}x{})".format(
-                        GUI_TEMPLATE.shape[1], GUI_TEMPLATE.shape[0]))
-                    return True
-            except Exception as e:
-                console.print("Lỗi load gui.png: {}".format(str(e)))
-        
-        console.print("⚠ Chưa có file gui.png, đang tải về...")
-        url = "https://raw.githubusercontent.com/Caoquy2k3/Phong-tus/refs/heads/main/gui.png"
-        
-        for attempt in range(3):
-            try:
-                urllib.request.urlretrieve(url, GUI_PNG_PATH)
-                if os.path.exists(GUI_PNG_PATH) and os.path.getsize(GUI_PNG_PATH) > 0:
-                    GUI_TEMPLATE = cv2.imread(GUI_PNG_PATH)
-                    if GUI_TEMPLATE is not None:
-                        console.print("✓ Đã tải và load gui.png vào RAM")
-                        return True
-            except Exception as e:
-                console.print("Lỗi tải lần {}: {}".format(attempt + 1, str(e)))
-                if attempt < 2:
-                    time.sleep(2)
-        
-        console.print("✗ Không thể tải gui.png, tool sẽ dùng phím Enter thay thế")
-        return False
-
-def get_gui_template():
-    global GUI_TEMPLATE
-    return GUI_TEMPLATE
-
-# ==================== SESSION POOL ====================
-_global_session = None
-_session_lock = threading.Lock()
-
-def get_global_session():
-    global _global_session
-    with _session_lock:
-        if _global_session is None:
-            _global_session = requests.Session()
-            adapter = requests.adapters.HTTPAdapter(
-                pool_connections=20,
-                pool_maxsize=50,
-                max_retries=1,
-                pool_block=False
-            )
-            _global_session.mount('https://', adapter)
-            _global_session.mount('http://', adapter)
-        return _global_session
-
-# ==================== HÀM LẤY VERSION TIKTOK ====================
-_version_cache = {}
-_version_cache_lock = threading.Lock()
-
-def get_tiktok_version_from_device(device_obj, serial=None):
-    cache_key = serial if serial else str(id(device_obj))
-    
-    with _version_cache_lock:
-        if cache_key in _version_cache:
-            cached_time, cached_version = _version_cache[cache_key]
-            if time.time() - cached_time < 60:
-                return cached_version
-    
+# ========== KIỂM TRA MÔI TRƯỜNG ==========
+def is_termux():
+    """Kiểm tra xem có đang chạy trong Termux không"""
     try:
-        result = device_obj.shell("dumpsys package com.ss.android.ugc.trill | grep versionName")
-        if result and result.strip():
-            match = re.search(r'versionName=([\d.]+)', result)
-            if match:
-                version = match.group(1)
-                with _version_cache_lock:
-                    _version_cache[cache_key] = (time.time(), version)
-                return version
-        
-        result = device_obj.shell("pm list packages --show-version-code com.ss.android.ugc.trill")
-        if result and result.strip():
-            match = re.search(r'versionCode=(\d+)', result)
-            if match:
-                version = match.group(1)
-                with _version_cache_lock:
-                    _version_cache[cache_key] = (time.time(), version)
-                return version
-        
-        return None
-    except Exception:
-        return None
-
-def get_all_devices_versions(devices_list):
-    versions = {}
-    for device in devices_list:
-        try:
-            serial = device.serial if hasattr(device, 'serial') else str(device)
-            version = get_tiktok_version_from_device(device, serial)
-            versions[serial] = version if version else "Unknown"
-        except:
-            versions[getattr(device, 'serial', str(device))] = "Unknown"
-    return versions
-
-# ==================== HÀM WAIT UI THẬT ====================
-def wait_tiktok_ui(device, timeout=20):
-    """
-    Chờ UI TikTok thật sự load xong
-    Nếu quá timeout thì trả về False để xử lý
-    """
-    start_time = time.time()
-    while time.time() - start_time < timeout:
-        try:
-            current = device.app_current()
-            if current.get("package") == TIKTOK_PACKAGE:
-                xml = device.dump_hierarchy()
-                if xml and len(xml) > 1000:
-                    return True
-        except:
-            pass
-        time.sleep(0.5)
-    return False
-
-def force_restart_tiktok(device):
-    """Buộc dừng và khởi động lại TikTok"""
-    try:
-        device.app_stop(TIKTOK_PACKAGE)
-        time.sleep(1)
-        device.app_start(TIKTOK_PACKAGE)
-        wait_tiktok_ui(device, timeout=15)
-    except Exception as e:
-        pass
-
-class TikTokBot:
-
-    def __init__(self, serial, auth_token, golike_username, account_id_val,
-                 delay_config, lam, force_stop_enabled, force_stop_after,
-                 min_follow_price):
-
-        self.serial = serial
-        self.auth_token = auth_token
-        self.golike_username = golike_username
-        self.account_id_val = account_id_val
-
-        self.delay_config = delay_config or {}
-        self.lam = lam
-        self.force_stop_enabled = force_stop_enabled
-        self.force_stop_after = force_stop_after
-        self.min_follow_price = min_follow_price
-        self.device = None
-        self.stop_flag = False
-        self.job_count = 0
-        self.previous_job_link = None
-        self.consecutive_errors = 0
-        self.max_errors = 5
-        self._ui_lock = threading.Lock()
-        self.ui_xml = ""
-        self.ui_timestamp = 0
-        self.ui_ttl = 0.4   # giảm TTL để tránh đọc UI cũ
-
-        self.last_action_time = 0
-        self.min_action_gap = 0.25
-
-        self.session = get_global_session()
-
-        self.headers = {
-            'Accept-Language': 'vi,en-US;q=0.9,en;q=0.8',
-            'Referer': 'https://app.golike.net/',
-            'Sec-Ch-Ua': '"Not A(Brand";v="99", "Google Chrome";v="121", "Chromium";v="121"',
-            'Sec-Ch-Ua-Mobile': '?0',
-            'Sec-Ch-Ua-Platform': 'Windows',
-            'Sec-Fetch-Dest': 'empty',
-            'Sec-Fetch-Mode': 'cors',
-            'Sec-Fetch-Site': 'same-site',
-            'T': 'VFZSak1FMTZZM3BOZWtFd1RtYzlQUT09',
-            'User-Agent': 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36',
-            'Authorization': auth_token,
-            'Content-Type': 'application/json;charset=utf-8',
-            'Connection': 'keep-alive'
-        }
-
-        self.logger = None
-        self.link_job_file = None
-        self.check_cmt_file = None
-
-        self.last_comment = None
-        self.job_counter_since_restart = 0
-        self.error_counter_since_restart = 0
-        self.last_restart_time = 0
-        self.last_adb_check_time = 0
-
-        self.processed_videos = self._load_processed_videos()
-        self.tiktok_version = None
-
-        self._init_instance_files()
-
-    def ensure_device(self):
-        try:
-            if not self.device:
-                return False
-
-            # ping thật UI (QUAN TRỌNG)
-            _ = self.device.info
-            self.consecutive_errors = 0
+        if os.path.exists('/data/data/com.termux'):
             return True
-
-        except:
-            self.consecutive_errors += 1
-            return False
-
-    def get_ui(self):
-        now = time.time()
-
-        # nếu UI còn mới → dùng
-        if self.ui_xml and (now - self.ui_timestamp < self.ui_ttl):
-            return self.ui_xml
-
-        with self._ui_lock:
-            try:
-                if not self.ensure_device():
-                    return ""
-
-                xml = self.device.dump_hierarchy()
-
-                # UPDATE UI NGAY LẬP TỨC (fix miss UI state)
-                self.ui_xml = xml
-                self.ui_timestamp = now
-
-                return xml
-
-            except:
-                self.consecutive_errors += 1
-                return ""
-
-    def find_ui(self, keyword):
-        """
-        đọc UI thật -> tránh click sai screen
-        """
-        xml = self.get_ui()
-
-        if not xml:
-            return False
-
-        return keyword in xml
-
-    def smart_click(self, selector=None, x=None, y=None, verify_keyword=None):
-
-        now = time.time()
-
-        # chống lệch nhịp UI
-        if now - self.last_action_time < self.min_action_gap:
-            time.sleep(self.min_action_gap)
-
-        if not self.ensure_device():
-            return False
-
-        try:
-            # ================= CLICK =================
-            if selector:
-                if selector.exists(timeout=1.2):
-                    selector.click()
-                else:
-                    return False
-
-            elif x is not None and y is not None:
-                self.device.click(x, y)
-
-            else:
-                return False
-
-            # ================= SYNC UI (QUAN TRỌNG NHẤT) =================
-            time.sleep(self.delay_config.get("after_click", 0.4))
-
-            # refresh UI ngay sau click → FIX MISS
-            self.ui_xml = self.device.dump_hierarchy()
-            self.ui_timestamp = time.time()
-
-            # ================= VERIFY STATE =================
-            if verify_keyword:
-                if verify_keyword not in self.ui_xml:
-                    # UI chưa đổi → coi như miss
-                    return False
-
-            self.last_action_time = time.time()
-            self.consecutive_errors = 0
-
+        if 'ANDROID_ROOT' in os.environ and 'PREFIX' in os.environ and 'com.termux' in os.environ.get('PREFIX', ''):
             return True
-
-        except:
-            self.consecutive_errors += 1
-            return False
-
-    def reset(self):
-        self.device = None
-        self.consecutive_errors = 0
-        time.sleep(1)
-    
-    def _get_tiktok_version(self):
-        return get_tiktok_version_from_device(self.device, self.serial)
-    
-    def _update_dashboard_with_version(self):
-        if self.tiktok_version:
-            with dashboard_lock:
-                if self.account_id_val in accounts_data:
-                    accounts_data[self.account_id_val]["tiktok_version"] = self.tiktok_version
-    
-    def _get_retry_delay(self):
-        idx = min(self.consecutive_errors, len(self.retry_delays) - 1)
-        return self.retry_delays[idx]
-    
-    def _reset_retry_counter(self):
-        self.consecutive_errors = 0
-    
-    def _increment_retry_counter(self):
-        self.consecutive_errors += 1
-        return self._get_retry_delay()
-    
-    def _init_instance_files(self):
-        safe_serial = re.sub(r'[^\w\-_]', '_', self.serial)
-        self.link_job_file = os.path.join(DATA_DIR, u"device_{}_link_job.json".format(safe_serial))
-        self.check_cmt_file = os.path.join(DATA_DIR, u"device_{}_check_cmt.json".format(safe_serial))
-        
-        if not os.path.exists(self.link_job_file):
-            with open(self.link_job_file, 'w', encoding='utf-8') as f:
-                json.dump({"processed_videos": []}, f)
-        
-        if not os.path.exists(self.check_cmt_file):
-            with open(self.check_cmt_file, 'w', encoding='utf-8') as f:
-                json.dump({"last_comment": "", "history": []}, f)
-    
-    def _load_processed_videos(self):
-        try:
-            if os.path.exists(self.link_job_file):
-                with open(self.link_job_file, 'r', encoding='utf-8') as f:
-                    data = json.load(f)
-                    return data.get("processed_videos", [])
-        except:
-            pass
-        return []
-    
-    def _save_processed_video(self, video_id):
-        try:
-            if video_id not in self.processed_videos:
-                self.processed_videos.append(video_id)
-                if len(self.processed_videos) > 10000:
-                    self.processed_videos = self.processed_videos[-5000:]
-            
-            def _write():
-                try:
-                    with open(self.link_job_file, 'w', encoding='utf-8') as f:
-                        json.dump({"processed_videos": self.processed_videos}, f, ensure_ascii=False, indent=2)
-                except:
-                    pass
-            threading.Thread(target=_write, daemon=True).start()
+        if os.path.exists('/system/bin/sh') and 'com.termux' in os.getcwd():
             return True
-        except Exception:
-            return False
-    
-    def _is_link_processed(self, link):
-        try:
-            video_id = self._get_video_id(link)
-            return video_id in self.processed_videos
-        except:
-            return False
-    
-    def _get_video_id(self, link):
-        try:
-            match = re.search(r'/video/(\d+)', link)
-            if match:
-                return match.group(1)
-            match = re.search(r'/(\d{15,})', link)
-            if match:
-                return match.group(1)
-            return hashlib.md5(link.encode()).hexdigest()[:10]
-        except:
-            return link
-    
-    def _update_dashboard_status(self, status, job_type=None):
-        with dashboard_lock:
-            if self.account_id_val in accounts_data:
-                accounts_data[self.account_id_val]["status"] = status[:120] if len(status) > 120 else status
-                accounts_data[self.account_id_val]["last_message"] = status
-                accounts_data[self.account_id_val]["message_time"] = get_vn_time().strftime('%H:%M:%S')
-                accounts_data[self.account_id_val]["last_update"] = time.time()
-                if job_type:
-                    accounts_data[self.account_id_val]["job_type"] = job_type
-    
-    def _update_dashboard_stats(self, job_type, coin=0, success=True):
-        with dashboard_lock:
-            if self.account_id_val not in accounts_data:
-                return
-            if success:
-                accounts_data[self.account_id_val]["done"] += 1
-                accounts_data[self.account_id_val]["total_xu"] += coin
-                accounts_data[self.account_id_val]["xu"] = coin
-                if job_type:
-                    accounts_data[self.account_id_val]["job_type"] = job_type
-                accounts_data[self.account_id_val]["last_success"] = time.time()
-            else:
-                accounts_data[self.account_id_val]["fail"] += 1
-                if job_type:
-                    accounts_data[self.account_id_val]["job_type"] = job_type
-            accounts_data[self.account_id_val]["last_update"] = time.time()
-    
-    def _update_current_link(self, link):
-        with dashboard_lock:
-            if self.account_id_val in accounts_data:
-                accounts_data[self.account_id_val]["link"] = link
-                accounts_data[self.account_id_val]["last_update"] = time.time()
-    
-    def _add_response_message(self, msg, job_type=None):
-        self._update_dashboard_status(msg, job_type)
-    
-    def _check_and_reconnect_adb(self):
-        """Kiểm tra kết nối ADB, KHÔNG kill-server/reset, chỉ kết nối lại u2"""
-        now = time.time()
-        if now - self.last_adb_check_time < 30:
-            return True
-        
-        self.last_adb_check_time = now
-        
-        try:
-            if self.device:
-                self.device.info
-                return True
-        except Exception:
-            pass
-        
-        try:
-            self.device = u2.connect(self.serial)
-            self.device.info
-            try:
-                self.device.app_start(TIKTOK_PACKAGE)
-                time.sleep(1)
-            except:
-                pass
-            return True
-        except Exception:
-            return False
-    
-    def _wait_for_ui_stable(self, wait_time=2.0, extra_wait=0.3):
-        if self.stop_flag or is_stop_all():
-            return False
-        
-        wait_time = min(wait_time, 8)
-        remaining = wait_time
-        while remaining > 0 and not self.stop_flag and not is_stop_all():
-            sleep_chunk = min(0.05, remaining)
-            time.sleep(sleep_chunk)
-            remaining -= sleep_chunk
-            time.sleep(0)
-        
-        if extra_wait > 0:
-            time.sleep(extra_wait)
-        
-        return not self.stop_flag and not is_stop_all()
-    
-    def _dump_ui_nodes(self):
-        now = time.time()
-        
-        if now - self.last_dump_time < self.min_dump_interval:
-            if self.ui_dump_cache["nodes"]:
-                return self.ui_dump_cache["nodes"]
-        self.last_dump_time = now
-        
-        if (self.ui_dump_cache["nodes"] and 
-            (now - self.ui_dump_cache["timestamp"]) < self.ui_dump_cache_ttl):
-            return self.ui_dump_cache["nodes"]
-        
-        try:
-            xml_content = self.device.dump_hierarchy()
-            
-            nodes = []
-            pattern = re.compile(r'<node\s+([^>]+)>')
-            attr_pattern = re.compile(r'(resource-id|content-desc|text|bounds|selected|clickable)="([^"]*)"')
-            
-            for match in pattern.finditer(xml_content):
-                attrs = dict(attr_pattern.findall(match.group(1)))
-                if attrs:
-                    nodes.append(attrs)
-            
-            self.ui_dump_cache["xml"] = xml_content
-            self.ui_dump_cache["timestamp"] = now
-            self.ui_dump_cache["nodes"] = nodes
-            
-            time.sleep(0)
-            return nodes
-        except Exception:
-            return []
-    
-    def _click_node_by_bounds(self, node):
-        bounds = node.get("bounds")
-        if not bounds:
-            return False
-        
-        pts = list(map(int, re.findall(r'\d+', bounds)))
-        if len(pts) >= 4:
-            x = (pts[0] + pts[2]) // 2
-            y = (pts[1] + pts[3]) // 2
-            self.device.click(x, y)
+        if os.path.exists('/data/data/com.termux/files/usr/bin'):
             return True
         return False
-    
-    def _restart_tiktok(self):
-        try:
-            self.device.app_stop(TIKTOK_PACKAGE)
-            time.sleep(0.8)
-            self.device.app_start(TIKTOK_PACKAGE)
-            wait_tiktok_ui(self.device, timeout=10)
-        except Exception:
-            pass
-    
-    def _check_app_status(self):
-        try:
-            current = self.device.app_current()
-            if current.get("package") != TIKTOK_PACKAGE:
-                self.device.app_start(TIKTOK_PACKAGE)
-                wait_tiktok_ui(self.device, timeout=10)
-                return False
-            return True
-        except Exception:
-            self._restart_tiktok()
-            return False
-    
-    def _open_link(self, link):
-        try:
-            if not self._check_and_reconnect_adb():
-                return False
-            cmd = u'am start -a android.intent.action.VIEW -d "{}" {}'.format(link, TIKTOK_PACKAGE)
-            self.device.shell(cmd)
-            launched = wait_tiktok_ui(self.device, timeout=8)
-            return launched
-        except Exception:
-            if self._check_and_reconnect_adb():
-                try:
-                    cmd = u'am start -a android.intent.action.VIEW -d "{}" {}'.format(link, TIKTOK_PACKAGE)
-                    self.device.shell(cmd)
-                    return wait_tiktok_ui(self.device, timeout=8)
-                except:
-                    pass
-            return False
-    
-    def _delay_countdown(self, delay_seconds, msg_prefix=u"Đang chờ"):
-        delay_seconds = min(delay_seconds, 300)
-        for i in range(int(delay_seconds), 0, -1):
-            if self.stop_flag or is_stop_all():
-                return
-            if i % 10 == 0 or i <= 3:
-                self._update_dashboard_status(u"{} {}s...".format(msg_prefix, i))
-            time.sleep(1)
-            time.sleep(0)
-    
-    def _get_random_delay(self, job_type):
-        if job_type in self.delay_config:
-            min_delay, max_delay = self.delay_config[job_type]
-            return random.randint(min_delay, max_delay)
-        return random.randint(3, 7)
-    
-    # ========== NUÔI NICK ==========
-    
-    def _do_share_and_copy_link(self, max_retry=2):
-        try:
-            share_selectors = [
-                {"descriptionContains": "share"},
-                {"descriptionContains": "gửi"},
-                {"textContains": "Share"},
-                {"textContains": "Gửi"}
-            ]
-
-            start_time = time.time()
-            clicked_share = False
-            while time.time() - start_time < 12:
-                if self.stop_flag or is_stop_all():
-                    return False
-                for s in share_selectors:
-                    if self.device(**s).exists:
-                        self.device(**s).click()
-                        clicked_share = True
-                        break
-                if clicked_share:
-                    break
-                time.sleep(0.15)
-
-            if not clicked_share:
-                return False
-
-            copy_selectors = [
-                {"text": "Sao chép liên kết"},
-                {"textContains": "Sao chép"},
-                {"text": "Copy link"},
-                {"textContains": "Copy"},
-                {"descriptionContains": "copy"},
-                {"descriptionContains": "link"}
-            ]
-
-            start_time = time.time()
-            clicked_copy = False
-            while time.time() - start_time < 8:
-                if self.stop_flag or is_stop_all():
-                    return False
-                for s in copy_selectors:
-                    if self.device(**s).exists:
-                        self.device(**s).click()
-                        clicked_copy = True
-                        break
-                if clicked_copy:
-                    break
-                time.sleep(0.15)
-
-            if clicked_copy:
-                time.sleep(0.3)
-                if self.device(textMatches="(?i)(Sao chép liên kết|Copy link)").exists:
-                    self.device.press("back")
-                return True
-            else:
-                self.device.press("back")
-                return False
-
-        except Exception:
-            return False
-    
-    def nuoi_nick_short(self, num_videos=2, share_rate=15, is_high_trust_mode=False):
-        try:
-            if is_high_trust_mode:
-                share_rate = random.randint(30, 50)
-            
-            for _ in range(1):
-                self.device.press("back")
-                time.sleep(0.15)
-            
-            time.sleep(0.6)
-            
-            try:
-                home_tab = self.device(text="Home", resourceIdMatches=".*tab.*")
-                if home_tab.exists:
-                    home_tab.click()
-                    time.sleep(0.3)
-            except:
-                pass
-            
-            success_share_count = 0
-            min_watch, max_watch = 5, 10
-            
-            for i in range(num_videos):
-                if self.stop_flag or is_stop_all():
-                    break
-                
-                watch_time = random.uniform(min_watch, max_watch)
-                
-                remaining = watch_time
-                while remaining > 0 and not self.stop_flag and not is_stop_all():
-                    sleep_time = min(0.3, remaining)
-                    time.sleep(sleep_time)
-                    remaining -= sleep_time
-                    time.sleep(0)
-                
-                if self.stop_flag or is_stop_all():
-                    break
-                
-                should_share = random.randint(1, 100) <= share_rate
-                
-                if should_share:
-                    if self._do_share_and_copy_link():
-                        success_share_count += 1
-                    time.sleep(random.uniform(0.6, 1.2))
-                
-                w, h = self.device.window_size()
-                x_mid = int(w * 0.5)
-                start_y = int(h * 0.85)
-                end_y = int(h * 0.2)
-                self.device.swipe(x_mid, start_y, x_mid, end_y, duration=random.uniform(0.12, 0.25))
-                
-                time.sleep(random.uniform(0.4, 0.8))
-            
-            return success_share_count
-            
-        except Exception:
-            return 0
-    
-    def nuoi_nick_thong_minh(self, delay_seconds, share_rate=15):
-        if delay_seconds <= 0:
-            return 0
-        
-        delay_seconds = min(delay_seconds, 300)
-        
-        time_per_video = 9
-        max_videos = max(1, delay_seconds // time_per_video)
-        max_videos = min(max_videos, 5)
-        
-        if max_videos > 0:
-            start_time = time.time()
-            self.nuoi_nick_short(num_videos=max_videos, share_rate=share_rate)
-            elapsed = time.time() - start_time
-            
-            remaining = delay_seconds - elapsed
-            if remaining > 0:
-                for remaining_sec in range(int(remaining), 0, -1):
-                    if self.stop_flag or is_stop_all():
-                        break
-                    if remaining_sec % 5 == 0 or remaining_sec <= 3:
-                        self._update_dashboard_status(u"Đợi thêm {}s...".format(remaining_sec))
-                    time.sleep(1)
-                    time.sleep(0)
-            
-            return elapsed
-        else:
-            for remaining_sec in range(delay_seconds, 0, -1):
-                if self.stop_flag or is_stop_all():
-                    break
-                if remaining_sec % 5 == 0 or remaining_sec <= 3:
-                    self._update_dashboard_status(u"Đợi {}s...".format(remaining_sec))
-                time.sleep(1)
-                time.sleep(0)
-            return delay_seconds
-    
-    # ========== XỬ LÝ JOB ==========
-    
-    def _is_like_node(self, node):
-        res_id = node.get("resource-id", "")
-        desc = node.get("content-desc", "").lower()
-        
-        if "like" in desc or "thích" in desc:
-            return True
-        if any(k in res_id for k in ["like", "digg", "heart"]):
-            return True
-        return False
-    
-    def _is_liked(self, node):
-        desc = node.get("content-desc", "").lower()
-        return (
-            node.get("selected") == "true"
-            or "unlike" in desc
-            or "bỏ thích" in desc
-        )
-    
-    def _find_like_btn(self, nodes):
-        candidates = []
-        for node in nodes:
-            if self._is_like_node(node):
-                bounds = node.get("bounds", "")
-                if bounds:
-                    pts = list(map(int, re.findall(r'\d+', bounds)))
-                    if len(pts) >= 4:
-                        x = (pts[0] + pts[2]) // 2
-                        if x > 500:
-                            candidates.append((node, x))
-        if not candidates:
-            return None
-        candidates.sort(key=lambda x: x[1], reverse=True)
-        return candidates[0][0]
-    
-    def do_like(self, max_retry=8):
-        if not self.device:
-            return False
-
-        if self.stop_flag or is_stop_all():
-            return False
-        
-        self._add_response_message(u"Tìm nút Like...", "like")
-        clicked = False
-        
-        for i in range(max_retry):
-            if self.stop_flag or is_stop_all():
-                return False
-            
-            self._wait_for_ui_stable(wait_time=0.3)
-            
-            nodes = self._dump_ui_nodes()
-            btn = self._find_like_btn(nodes)
-            
-            if not btn:
-                time.sleep(1.2)
-                continue
-            
-            if self._is_liked(btn):
-                self._add_response_message(u"Đã Like rồi", "like")
-                return True
-            
-            if not clicked:
-                if not self._click_node_by_bounds(btn):
-                    continue
-                clicked = True
-            
-            for check in range(2):
-                if self.stop_flag or is_stop_all():
-                    return False
-                time.sleep(1.5)
-                
-                nodes_after = self._dump_ui_nodes()
-                btn_after = self._find_like_btn(nodes_after)
-                
-                if not btn_after:
-                    continue
-                
-                if self._is_liked(btn_after):
-                    self._add_response_message(u"Like thành công", "like")
-                    return True
-            
-            clicked = False
-            time.sleep(1.5)
-        
-        self._add_response_message(u"Like thất bại", "like")
-        return False
-    
-    def do_follow(self, max_retry=3):
-        if not self.device:
-            return False
-
-        if self.stop_flag or is_stop_all():
-            return False
-        
-        try:
-            target_texts = ["theo dõi", "follow", "follow back", "follow lại"]
-            target_ids = ["follow_or_edit_profile_btn", "follow_btn"]
-            
-            for i in range(max_retry):
-                if self.stop_flag or is_stop_all():
-                    return False
-                
-                self._wait_for_ui_stable(wait_time=0.8)
-                
-                nodes = self._dump_ui_nodes()
-                
-                for node in nodes:
-                    text = node.get("text", "").strip().lower()
-                    res_id = node.get("resource-id", "")
-                    
-                    if any(t == text for t in target_texts) or any(idx in res_id for idx in target_ids):
-                        if "đang theo dõi" in text or "following" in text:
-                            self._add_response_message(u"Đã follow từ trước", "follow")
-                            return True
-                        
-                        if self._click_node_by_bounds(node):
-                            self._wait_for_ui_stable(wait_time=3)
-                            
-                            nodes_after = self._dump_ui_nodes()
-                            verified = False
-                            success_texts = ["đang theo dõi", "following", "nhắn tin", "message"]
-                            
-                            for n in nodes_after:
-                                t = n.get("text", "").lower()
-                                desc = n.get("content-desc", "").lower()
-                                
-                                if any(s in t for s in success_texts) or any(s in desc for s in success_texts):
-                                    verified = True
-                                    break
-                            
-                            if verified:
-                                self._add_response_message(u"Follow thành công", "follow")
-                                return True
-                            else:
-                                self._add_response_message(u"Follow thành công", "follow")
-                                return True
-                
-                time.sleep(1.5)
-                
-            self._add_response_message(u"Không tìm thấy nút Follow", "follow")
-            return False
-                
-        except Exception:
-            return False
-    
-    def do_favorite(self, max_retry=5):
-        if not self.device:
-            return False
-
-        if self.stop_flag or is_stop_all():
-            return False
-        
-        try:
-            fav_identifiers = {
-                "ids": ["favorite_icon", "h2m", "iv_favorite", "favorite_icon"],
-                "descs": ["favorite", "yêu thích", "lưu", "favorites"]
-            }
-
-            for i in range(max_retry):
-                if self.stop_flag or is_stop_all():
-                    return False
-                
-                self._wait_for_ui_stable(wait_time=0.8)
-                
-                nodes = self._dump_ui_nodes()
-                
-                for node in nodes:
-                    res_id = node.get("resource-id", "")
-                    desc = node.get("content-desc", "").lower()
-                    
-                    is_fav = any(tid in res_id for tid in fav_identifiers["ids"]) or \
-                             any(td in desc for td in fav_identifiers["descs"])
-
-                    if is_fav:
-                        if node.get("selected") == "true" or "đã lưu" in desc or "added" in desc:
-                            self._add_response_message(u"Đã lưu từ trước", "favorite")
-                            return True
-                        
-                        bounds = node.get("bounds", "")
-                        if bounds:
-                            if self._click_node_by_bounds(node):
-                                self._wait_for_ui_stable(wait_time=1.2)
-                                return True
-                                
-            time.sleep(1.5)
-
-            self._add_response_message(u"Không tìm thấy nút Favorites", "favorite")
-            return False
-            
-        except Exception:
-            return False
-    
-    def _load_last_comment(self):
-        try:
-            if os.path.exists(self.check_cmt_file):
-                with open(self.check_cmt_file, 'r', encoding='utf-8') as f:
-                    data = json.load(f)
-                    return data.get('last_comment', None)
-            return None
-        except:
-            return None
-    
-    def _save_comment(self, comment, status="sent"):
-        try:
-            def _write():
-                try:
-                    data = {}
-                    if os.path.exists(self.check_cmt_file):
-                        with open(self.check_cmt_file, 'r', encoding='utf-8') as f:
-                            data = json.load(f)
-                    
-                    data['last_comment'] = comment
-                    data['last_status'] = status
-                    data['last_time'] = get_vn_time().isoformat()
-                    
-                    if 'history' not in data:
-                        data['history'] = []
-                    
-                    data['history'].append({
-                        'comment': comment,
-                        'status': status,
-                        'timestamp': get_vn_time().isoformat()
-                    })
-                    
-                    if len(data['history']) > 100:
-                        data['history'] = data['history'][-100:]
-                    
-                    with open(self.check_cmt_file, 'w', encoding='utf-8') as f:
-                        json.dump(data, f, ensure_ascii=False, indent=2)
-                except:
-                    pass
-            threading.Thread(target=_write, daemon=True).start()
-            return True
-        except:
-            return False
-    
-    def _normalize_comment(self, text):
-        if not text:
-            return ""
-        text = text.lower()
-        text = re.sub(r'[^\w\s]', ' ', text)
-        text = ' '.join(text.split())
-        return text
-    
-    def _is_duplicate_comment(self, new_comment, last_comment):
-        if not last_comment:
-            return False
-        new_norm = self._normalize_comment(new_comment)
-        last_norm = self._normalize_comment(last_comment)
-        if new_norm == last_norm:
-            return True
-        similarity = SequenceMatcher(None, new_norm, last_norm).ratio()
-        return similarity >= SIMILARITY_THRESHOLD
-    
-    def _filter_comment_content(self, text):
-        if not text:
-            return None
-        text = re.sub(r'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\\(\\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+', '', text)
-        text = re.sub(r'(.)\1{4,}', r'\1', text)
-        text = ' '.join(text.split())
-        if len(text) < 3:
-            return None
-        if len(text) > 400:
-            text = text[:400]
-        return text
-    
-    def do_comment(self, text, link):
-        if not self.device:
-            return False
-
-        if self.stop_flag or is_stop_all():
-            return False
-        
-        if self.previous_job_link == link:
-            return False
-
-        filtered_text = self._filter_comment_content(text)
-        if not filtered_text:
-            return False
-
-        last_comment = self._load_last_comment()
-        if self._is_duplicate_comment(filtered_text, last_comment):
-            return False
-
-        comment_opened = False
-        for attempt in range(4):
-            if self.stop_flag or is_stop_all():
-                return False
-            self._wait_for_ui_stable(wait_time=0.8)
-            
-            comment_btn = self.device(descriptionContains="comment")
-            if not comment_btn.exists:
-                comment_btn = self.device(descriptionContains="bình luận")
-                
-            if comment_btn.exists:
-                comment_btn.click()
-                self._wait_for_ui_stable(wait_time=1.5)
-                comment_opened = True
-                break
-            
-            time.sleep(1.5)
-            
-        if not comment_opened:
-            return False
-
-        self._wait_for_ui_stable(wait_time=0.8)
-        
-        input_box = self.device(className="android.widget.EditText")
-        if not input_box.exists:
-            return False
-
-        input_box.click()
-        self._wait_for_ui_stable(wait_time=0.3)
-        
-        try:
-            input_box.clear_text()
-        except:
-            pass
-            
-        self.device.clipboard.set(filtered_text)
-        self.device.press("paste")
-        self._wait_for_ui_stable(wait_time=0.8)
-
-        template = get_gui_template()
-        if template is not None:
-            try:
-                screenshot = self.device.screenshot(format="opencv")
-                if screenshot is not None:
-                    result = cv2.matchTemplate(screenshot, template, cv2.TM_CCOEFF_NORMED)
-                    min_val, max_val, min_loc, max_loc = cv2.minMaxLoc(result)
-                    
-                    threshold = 0.7
-                    if max_val >= threshold:
-                        h, w = template.shape[:2]
-                        x = max_loc[0] + w // 2
-                        y = max_loc[1] + h // 2
-                        self.device.click(x, y)
-                        self._add_response_message(u"Đã click nút Gửi (OpenCV)", "comment")
-                    else:
-                        self.device.press("enter")
-                        self._add_response_message(u"Độ khớp thấp, dùng Enter", "comment")
-                else:
-                    self.device.press("enter")
-            except Exception:
-                self.device.press("enter")
-        else:
-            self.device.press("enter")
-
-        if self.stop_flag or is_stop_all():
-            return False
-        
-        self._save_comment(filtered_text, "sent")
-        self.previous_job_link = link
-        return True
-    
-    # ========== API GOLIKE ==========
-    
-    def _parse_api_response(self, response, func_name="api_call"):
-        result = {
-            'success': False,
-            'status_code': None,
-            'message': '',
-            'data': None,
-            'is_limit': False,
-            'is_checkpoint': False
-        }
-        
-        try:
-            result['status_code'] = response.status_code
-            
-            try:
-                resp_json = response.json()
-                result['data'] = resp_json
-                result['message'] = resp_json.get('message', resp_json.get('msg', u"HTTP {}".format(response.status_code)))
-                
-                if response.status_code == 200 and resp_json.get('status') == 200:
-                    result['success'] = True
-                
-                msg_lower = result['message'].lower()
-                if any(kw in msg_lower for kw in ['limit', 'giới hạn', 'quá nhiều', 'too many']):
-                    result['is_limit'] = True
-                if any(kw in msg_lower for kw in ['checkpoint', 'verify', 'xác minh']):
-                    result['is_checkpoint'] = True
-                    
-            except:
-                result['message'] = response.text if response.text else u"HTTP {}".format(response.status_code)
-                
-        except Exception as e:
-            result['message'] = u"Exception: {}".format(str(e))
-        
-        return result
-    
-    def _chonacc(self):
-        try:
-            response = self.session.get('https://gateway.golike.net/api/tiktok-account', headers=self.headers, timeout=25)
-            parsed = self._parse_api_response(response, "chonacc")
-            
-            if not parsed['success']:
-                return {"status": parsed['status_code'], "message": parsed['message'], "data": []}
-            
-            data = parsed['data'].get("data", []) if parsed['data'] else []
-            return {"status": 200, "message": parsed['message'], "data": data}
-        except Exception as e:
-            return {"status": 500, "message": str(e), "data": []}
-    
-    def _nhannv(self):
-        try:
-            params = {'account_id': self.account_id_val, 'data': 'null'}
-            response = self.session.get('https://gateway.golike.net/api/advertising/publishers/tiktok/jobs',
-                                        headers=self.headers, params=params, timeout=25)
-            parsed = self._parse_api_response(response, "nhannv")
-            
-            if not parsed['success']:
-                return {"status": parsed['status_code'], "message": parsed['message']}
-            
-            return {"status": 200, "message": parsed['message'], "data": parsed['data'].get("data") if parsed['data'] else None}
-        except Exception as e:
-            return {"status": 500, "message": str(e)}
-    
-    def _baoloi(self, ads_id, object_id, loai):
-        try:
-            json_data = {'ads_id': ads_id, 'object_id': object_id, 'account_id': self.account_id_val, 'type': loai}
-            response = self.session.post('https://gateway.golike.net/api/advertising/publishers/tiktok/skip-jobs',
-                                         headers=self.headers, json=json_data, timeout=25)
-            parsed = self._parse_api_response(response, "baoloi")
-            
-            if not parsed['success']:
-                return {"status": parsed['status_code'], "message": parsed['message']}
-            
-            return {"status": 200, "message": parsed['message']}
-        except Exception as e:
-            return {"status": 500, "message": str(e)}
-    
-    def _hoanthanh(self, ads_id):
-        try:
-            json_data = {
-                'ads_id': ads_id,
-                'account_id': self.account_id_val,
-                'async': True,
-                'data': None
-            }
-            response = self.session.post('https://gateway.golike.net/api/advertising/publishers/tiktok/complete-jobs',
-                                         headers=self.headers, json=json_data, timeout=25)
-            parsed = self._parse_api_response(response, "complete_jobs")
-            
-            if parsed['success']:
-                return {"status": True, "data": parsed.get('data'), "message": parsed.get('message', 'Success')}
-            return {"status": False, "message": parsed.get('message', 'Lỗi không xác định')}
-        except Exception as e:
-            return {"status": False, "message": str(e)}
-    
-    def _get_job_price(self, job_data):
-        try:
-            for key in ['price_after_cost', 'price_per_after_cost', 'amount', 'reward', 'price', 'money', 'coin']:
-                if key in job_data and job_data[key]:
-                    val = job_data[key]
-                    if isinstance(val, dict):
-                        for subkey in ['amount', 'value', 'money', 'coin']:
-                            if subkey in val and val[subkey]:
-                                val = val[subkey]
-                                break
-                    if isinstance(val, str):
-                        val = re.sub(r'[^\d.]', '', val)
-                        if val:
-                            val = float(val) if '.' in val else int(val)
-                        else:
-                            continue
-                    if isinstance(val, (int, float)) and val > 0:
-                        return int(val)
-            return 0
-        except:
-            return 0
-    
-    def _process_job(self, job_data):
-        try:
-            if self.stop_flag or is_stop_all():
-                return False, u"Dừng theo yêu cầu", None, 0
-            
-            link = job_data["link"]
-            action_type = job_data["type"]
-            ads_id = job_data["id"]
-            job_price = self._get_job_price(job_data)
-
-            if action_type == "follow" and job_price < self.min_follow_price:
-                return False, u"Job Follow giá {}đ < {}đ".format(job_price, self.min_follow_price), ads_id, job_price
-
-            if action_type not in ["like", "follow", "comment", "favorite"]:
-                return False, u"Loại nhiệm vụ không hỗ trợ", None, 0
-
-            if not self._open_link(link):
-                return False, u"Mở link thất bại", ads_id, job_price
-
-            success = False
-            reason = ""
-
-            self._wait_for_ui_stable(wait_time=1.5)
-
-            if action_type == "like":
-                success = self.do_like()
-                reason = u"Like thất bại" if not success else u"Like thành công"
-            elif action_type == "follow":
-                success = self.do_follow()
-                reason = u"Follow thất bại" if not success else u"Follow thành công"
-            elif action_type == "favorite":
-                success = self.do_favorite()
-                reason = u"Favorite thất bại" if not success else u"Favorite thành công"
-            elif action_type == "comment":
-                comment_text = (
-                    job_data.get("text") or
-                    job_data.get("description") or
-                    job_data.get("comment") or
-                    job_data.get("noidung")
-                )
-                if not comment_text:
-                    return False, u"Thiếu nội dung bình luận", ads_id, job_price
-                success = self.do_comment(comment_text, link)
-                reason = u"Comment thất bại" if not success else u"Comment thành công"
-
-            if not success:
-                return False, reason, ads_id, job_price
-
-            result = self._hoanthanh(ads_id)
-            if result.get('status'):
-                video_id = self._get_video_id(link)
-                self._save_processed_video(video_id)
-                return True, result.get('message', 'Thành công'), ads_id, job_price
-            else:
-                return False, result.get('message', 'Lỗi hoàn thành'), ads_id, job_price
-                
-        except Exception as e:
-            return False, str(e), None, 0
-    
-    # ==================== HÀM LẤY USERNAME LÌ LỢM (20s + FORCE STOP) ====================
-    
-    def _force_stop_tiktok(self):
-        if self.stop_flag or is_stop_all():
-            return
-        
-        pkg = TIKTOK_PACKAGE
-        self.device.shell(u"am start -a android.settings.APPLICATION_DETAILS_SETTINGS -d package:{}".format(pkg))
-        
-        if self.device(textMatches="(?i)(Buộc dừng|Buộc đóng|Force stop)").wait(timeout=8):
-            for attempt in range(3):
-                if self.stop_flag or is_stop_all():
-                    return
-                btn_stop = self.device(resourceIdMatches=".*(?i)(force_stop|stop_button).*")
-                if not btn_stop.exists:
-                    btn_stop = self.device(textMatches="(?i)(Buộc dừng|Buộc đóng|Force stop)")
-                
-                if btn_stop.exists:
-                    if btn_stop.info.get('enabled', False):
-                        btn_stop.click()
-                        
-                        btn_ok = self.device(resourceId="android:id/button1")
-                        if not btn_ok.exists:
-                            btn_ok = self.device(textMatches="(?i)(ok|đồng ý|xác nhận)")
-                            
-                        if btn_ok.wait(timeout=2):
-                            btn_ok.click()
-                            return
-                    else:
-                        return
-                time.sleep(0.3)
-    
-    def _start_tiktok_and_wait(self):
-        if self.stop_flag or is_stop_all():
-            return False
-        
-        self.device.app_start(TIKTOK_PACKAGE)
-        
-        if self.device(resourceIdMatches=".*tab_layout.*").wait(timeout=20):
-            return True
-        else:
-            return False
-    
-    def _click_username_by_dump(self):
-        """Hàm quét username từ XML sau khi đã vào profile"""
-        try:
-            # Dùng Deep Link để vào thẳng profile
-            deeplink_url = "tiktok://user/profile"
-            self.device.shell(f'am start -a android.intent.action.VIEW -d "{deeplink_url}" {TIKTOK_PACKAGE}')
-            time.sleep(2)
-
-            start_scan = time.time()
-            while time.time() - start_scan < 8:
-                if self.stop_flag or is_stop_all():
-                    return None
-                
-                xml = self.device.dump_hierarchy()
-                if not xml:
-                    continue
-
-                match = re.search(r'text="(@[a-zA-Z0-9_\.]+)"', xml)
-                if match:
-                    username = match.group(1).replace("@", "").strip().lower()
-                    if len(username) > 2 and len(username) < 50:
-                        return username
-                
-                exclude = ['home', 'feed', 'video', 'like', 'share', 'comment', 'for you', 
-                          'following', 'inbox', 'profile', 'settings', 'message', 'notification']
-                matches = re.findall(r'text="([a-zA-Z0-9_]{4,30})"', xml)
-                for m in matches:
-                    u = m.lower()
-                    if u not in exclude and not any(k in u for k in exclude):
-                        if len(u) > 2 and len(u) < 50:
-                            return u
-                time.sleep(1)
-            return None
-        except Exception as e:
-            self._add_response_message(u"Lỗi quét username: {}".format(str(e)[:50]))
-            return None
-    
-    def _get_username_persistent_loop(self):
-        """Lấy username không giới hạn: Đợi 20s -> Force Stop -> Làm lại"""
-        attempt = 1
-        while not self.stop_flag and not is_stop_all():
-            self._update_dashboard_status(u"Quét Username lần {}...".format(attempt))
-            
-            self.device.app_start(TIKTOK_PACKAGE)
-            
-            start = time.time()
-            stable = 0
-            ui_ready = False
-
-            while time.time() - start < 20:
-                if self.stop_flag or is_stop_all():
-                    return None
-
-                try:
-                    if self.device(textMatches="@.{3,30}").exists:
-                        stable += 1
-                        if stable >= 2:   # UI ổn định 2 lần liên tiếp
-                            ui_ready = True
-                            break
-                    else:
-                        stable = 0
-
-                except:
-                    pass
-
-                time.sleep(0.3)
-
-            if ui_ready:
-                username = self._click_username_by_dump()
-                if username and len(username) > 2:
-                    self._add_response_message(u"✓ Đã lấy username: @{}".format(username))
-                    return username
-                self._add_response_message(u"Không tìm thấy tên trên màn hình...")
-            else:
-                self._add_response_message(u"Quá 20s app không load. Buộc dừng ngay!")
-
-            self._force_stop_tiktok()
-            time.sleep(1.5)
-            attempt += 1
-        return None
-    
-    # ==================== HÀM ADD TÀI KHOẢN (TỰ ĐỘNG XỬ LÝ FOLLOW XÁC MINH) ====================
-    
-    def verify_account_logic_new(self, username):
-        """Logic xác thực tài khoản - xử lý mã lỗi và tự động trích xuất link follow"""
-        url = "https://gateway.golike.net/api/tiktok-account/verify-account-id"
-        username = username.replace('@', '').strip()
-        payload = {"unique_id": username}
-        
-        try:
-            res = self.session.post(url, headers=self.headers, json=payload, timeout=25)
-            data = res.json()
-
-            if isinstance(data, list):
-                msg_error = data[0] if len(data) > 0 else u"Lỗi API"
-                return False, msg_error, None, None
-
-            message = data.get("message") or data.get("msg") or u"Lỗi xác thực"
-            target_data = data.get("data", {})
-            if not isinstance(target_data, dict):
-                target_data = {}
-
-            found_links = re.findall(r'https://www.tiktok.com/@[a-zA-Z0-9._]+', message)
-            target_follow = target_data.get("is_follow_id")
-            follow_link = found_links[0] if found_links else (f"https://www.tiktok.com/@{target_follow}" if target_follow else None)
-
-            if res.status_code == 200:
-                account_id = target_data.get("id")
-                if account_id:
-                    return True, message, account_id, follow_link
-            
-            return False, message, None, follow_link
-        except Exception as e:
-            return False, u"Lỗi: {}".format(str(e)), None, None
-    
-    def auto_setup_account(self):
-        """Quy trình: Quét Username -> Add Acc -> Trả về ID và username"""
-        auto_username = self._get_username_persistent_loop()
-        if not auto_username:
-            return None, None
-
-        self._add_response_message(u"Kiểm tra acc trên hệ thống...")
-        chontiktok = self._chonacc()
-        for acc in chontiktok.get("data", []):
-            if acc.get("unique_username", "").strip().lower() == auto_username:
-                self._add_response_message(u"Tài khoản @{} đã sẵn sàng.".format(auto_username))
-                return acc.get("id"), auto_username
-
-        self._add_response_message(u"Đang Add tài khoản @{}...".format(auto_username))
-        ok, msg, acc_id, target_link = self.verify_account_logic_new(auto_username)
-
-        if not ok and target_link:
-            self._add_response_message(u"Đang follow link xác minh: {}".format(target_link))
-            if self._open_link(target_link):
-                time.sleep(1.5)
-                if self.do_follow():
-                    self._add_response_message(u"Follow xác minh thành công!")
-                    time.sleep(2)
-                    ok, msg, acc_id, _ = self.verify_account_logic_new(auto_username)
-                    self.device.press("back") 
-                else:
-                    self._add_response_message(u"Follow xác minh thất bại!")
-            else:
-                self._add_response_message(u"Không thể mở link xác minh!")
-
-        if ok and acc_id:
-            self._add_response_message(u"✓ Add thành công! ID: {}".format(acc_id))
-            return acc_id, auto_username
-        
-        self._add_response_message(u"✗ Add thất bại: {}".format(msg))
-        return None, None
-    
-    # ==================== HÀM CHẠY CHÍNH ====================
-    
-    def run(self):
-        temp_account_id = "temp_{}".format(self.serial)
-        self.account_id_val = temp_account_id
-        
-        with dashboard_lock:
-            accounts_data[temp_account_id] = {
-                "username": "None",
-                "status": u"Đang kết nối...",
-                "last_message": u"Đang kết nối thiết bị...",
-                "message_time": get_vn_time().strftime('%H:%M:%S'),
-                "job_type": "",
-                "xu": 0,
-                "total_xu": 0,
-                "done": 0,
-                "fail": 0,
-                "link": "",
-                "device_serial": self.serial,
-                "last_update": time.time(),
-                "last_success": time.time(),
-                "tiktok_version": None
-            }
-        
-        self._add_response_message(u"Đang kết nối thiết bị...")
-        
-        try:
-            self.device = u2.connect(self.serial)
-            self.device.info
-            self._add_response_message(u"Kết nối thiết bị thành công")
-            
-            self._add_response_message(u"Đang lấy phiên bản TikTok...")
-            self.tiktok_version = self._get_tiktok_version()
-            if self.tiktok_version:
-                self._add_response_message(u"Phiên bản TikTok: {}".format(self.tiktok_version))
-                self._update_dashboard_with_version()
-            else:
-                self._add_response_message(u"Không lấy được phiên bản TikTok")
-                
-        except Exception as e:
-            self._add_response_message(u"Kết nối thiết bị thất bại: {}".format(str(e)))
-            with dashboard_lock:
-                if temp_account_id in accounts_data:
-                    del accounts_data[temp_account_id]
-            return
-        
-        if self.force_stop_enabled:
-            self._add_response_message(u"Đang force stop TikTok...")
-            self._force_stop_tiktok()
-            time.sleep(1.2)
-        
-        self._add_response_message(u"Đang mở TikTok...")
-        self._start_tiktok_and_wait()
-        
-        # ==================== QUY TRÌNH AUTO SETUP TÀI KHOẢN ====================
-        final_account_id, auto_username = self.auto_setup_account()
-        
-        if not final_account_id or not auto_username:
-            self._add_response_message(u"Không thể thiết lập tài khoản. Dừng luồng.")
-            with dashboard_lock:
-                if temp_account_id in accounts_data:
-                    del accounts_data[temp_account_id]
-                if self.account_id_val in accounts_data:
-                    del accounts_data[self.account_id_val]
-            return
-        
-        self.account_id_val = final_account_id
-        
-        # Cập nhật dashboard với username thật
-        with dashboard_lock:
-            if final_account_id in accounts_data:
-                accounts_data[final_account_id]["username"] = auto_username
-                accounts_data[final_account_id]["status"] = u"Sẵn sàng"
-                accounts_data[final_account_id]["last_message"] = u"Đã xác thực @{}".format(auto_username)
-                accounts_data[final_account_id]["tiktok_version"] = self.tiktok_version
-                accounts_data[final_account_id]["last_update"] = time.time()
-            else:
-                accounts_data[final_account_id] = {
-                    "username": auto_username,
-                    "status": u"Sẵn sàng",
-                    "last_message": u"Đã xác thực @{}".format(auto_username),
-                    "message_time": get_vn_time().strftime('%H:%M:%S'),
-                    "job_type": "",
-                    "xu": 0,
-                    "total_xu": 0,
-                    "done": 0,
-                    "fail": 0,
-                    "link": "",
-                    "device_serial": self.serial,
-                    "last_update": time.time(),
-                    "last_success": time.time(),
-                    "tiktok_version": self.tiktok_version
-                }
-            
-            # Xóa temp account nếu có
-            if temp_account_id in accounts_data:
-                del accounts_data[temp_account_id]
-        
-        # Nuôi nick khởi động
-        num_videos_khoi_dong = self.delay_config.get('nuoi_nick', 2)
-        share_rate = self.delay_config.get('share_rate', 15)
-        if num_videos_khoi_dong > 0:
-            self._add_response_message(u"Đang nuôi nick khởi động...")
-            self.nuoi_nick_short(num_videos=num_videos_khoi_dong, share_rate=share_rate)
-        
-        self._reset_retry_counter()
-        
-        # ==================== VÒNG LẶP LÀM JOB ====================
-        while not self.stop_flag and not is_stop_all():
-            try:
-                self._update_dashboard_status(u"Đang tìm nhiệm vụ...")
-                
-                delay_time = self._get_random_delay('job')
-                self._delay_countdown(delay_time, u"Đang tìm nhiệm vụ")
-
-                nhanjob = self._nhannv()
-                
-                if nhanjob.get("status") == 200:
-                    self._reset_retry_counter()
-                    
-                    data = nhanjob.get("data")
-                    
-                    if not data or not data.get("link"):
-                        num_videos_het_job = max(2, self.delay_config.get('nuoi_nick', 2) * 2)
-                        share_rate_het_job = random.randint(30, 50)
-                        self.nuoi_nick_short(num_videos=num_videos_het_job, share_rate=share_rate_het_job, is_high_trust_mode=True)
-                        
-                        time.sleep(1.5)
-                        continue
-
-                    current_link = data.get("link")
-                    self._update_current_link(current_link)
-
-                    if self._is_link_processed(current_link):
-                        skip_msg = self._baoloi(data["id"], data["object_id"], data["type"])
-                        self._add_response_message(u"Đã bỏ qua video đã làm: {}".format(skip_msg.get("message", "")))
-                        continue
-
-                    if data["type"] not in self.lam:
-                        skip_msg = self._baoloi(data["id"], data["object_id"], data["type"])
-                        self._add_response_message(u"Bỏ qua job {}: {}".format(data["type"], skip_msg.get("message", "")))
-                        time.sleep(0.5)
-                        continue
-
-                    status_map = {
-                        "follow": u"Đang follow...",
-                        "like": u"Đang like...",
-                        "comment": u"Đang comment...",
-                        "favorite": u"Đang favorite..."
-                    }
-                    self._update_dashboard_status(status_map.get(data["type"], u"Đang xử lý..."))
-
-                    success, reason, job_ads_id, job_price = self._process_job(data)
-
-                    if success:
-                        self.job_count += 1
-                        self._update_dashboard_stats(data["type"], job_price, success=True)
-                        self._add_response_message(u"{} - Giá: {} xu".format(reason, job_price))
-                        
-                        delay_time_done = self.delay_config.get('delay_done', 9)
-                        share_rate_normal = self.delay_config.get('share_rate', 15)
-                        
-                        if delay_time_done > 0:
-                            self.nuoi_nick_thong_minh(delay_time_done, share_rate_normal)
-                        
-                        if self.force_stop_after > 0 and self.job_count >= self.force_stop_after:
-                            self._add_response_message(u"Đạt {} job, force stop TikTok...".format(self.job_count))
-                            self._force_stop_tiktok()
-                            self.job_count = 0
-                            self._start_tiktok_and_wait()
-                    else:
-                        self._update_dashboard_stats(data["type"], 0, success=False)
-                        self._add_response_message(u"{}".format(reason))
-                        
-                        num_videos_loi = max(1, self.delay_config.get('nuoi_nick', 2) // 2)
-                        share_rate_loi = self.delay_config.get('share_rate', 15)
-                        if num_videos_loi > 0:
-                            self.nuoi_nick_short(num_videos=num_videos_loi, share_rate=share_rate_loi)
-                        
-                        self._baoloi(data["id"], data["object_id"], data["type"])
-                        time.sleep(0.5)
-                else:
-                    error_msg = nhanjob.get("message", "Lỗi không xác định")
-                    retry_wait = self._increment_retry_counter()
-                    self._add_response_message(u"API: {} - Thử lại sau {}s".format(error_msg, retry_wait))
-                    
-                    num_videos = self.delay_config.get('nuoi_nick', 2)
-                    share_rate_cao = random.randint(30, 50)
-                    self.nuoi_nick_short(num_videos=num_videos, share_rate=share_rate_cao, is_high_trust_mode=True)
-                    
-                    self._delay_countdown(retry_wait, u"Lỗi API - Thử lại sau")
-                    
-            except Exception as e:
-                if self.stop_flag or is_stop_all():
-                    break
-                
-                retry_wait = self._increment_retry_counter()
-                self._add_response_message(u"Lỗi: {} - Thử lại sau {}s".format(str(e), retry_wait))
-                self._delay_countdown(retry_wait, u"Lỗi - Thử lại sau")
-        
-        self._add_response_message(u"Bot đã dừng")
-
-
-# ==================== CÁC HÀM HỖ TRỢ ====================
-
-def banner():
-    os.system('clear' if os.name == 'posix' else 'cls')
-    banner_text = u"""
-      \033[38;2;153;51;255m▄▄▄█████▓ █    ██   ██████    ▄▄▄█████▓ ▒█████   ▒█████   ██▓
-      \033[38;2;170;70;255m▓  ██▒ ▓▒ ██  ▓██▒▒██    ▒    ▓  ██▒ ▓▒▒██▒  ██▒▒██▒  ██▒▓██▒
-      \033[38;2;190;90;255m▒ ▓██░ ▒░▓██  ▒██░░ ▓██▄      ▒ ▓██░ ▒░▒██░  ██▒▒██░  ██▒▒██░
-      \033[38;2;210;110;240m░ ▓██▓ ░ ▓▓█  ░██░  ▒   ██▒   ░ ▓██▓ ░ ▒██   ██░▒██   ██░▒██░
-      \033[38;2;230;130;220m  ▒██▒ ░ ▒▒█████▓ ▒██████▒▒     ▒██▒ ░ ░ ████▓▒░░ ████▓▒░░██████▒
-      \033[38;2;240;150;200m  ▒ ░░   ░▒▓▒ ▒ ▒ ▒ ▒▓▒ ▒ ░     ▒ ░░   ░ ▒░▒░▒░ ░ ▒░▒░▒░ ░ ▒░▓  ░
-      \033[38;2;200;200;255m    ░    ░░▒░ ░ ░ ░ ░▒  ░ ░       ░      ░ ▒ ▒░   ░ ▒ ▒░ ░ ░ ▒  ░
-      \033[38;2;150;230;255m  ░       ░░░ ░ ░ ░  ░  ░       ░      ░ ░ ░ ▒  ░ ░ ░ ▒    ░ ░
-      \033[38;2;120;255;230m            ░           ░                  ░ ░      ░ ░      ░  ░
-\033[0m
-
-\033[38;2;255;200;140m[</>] \033[38;2;200;160;255mADMIN: NHƯ ANH ĐÃ THẤY EM   \033[38;2;255;220;160mPhiên Bản: \033[38;2;120;255;220mv4.6-FIXED
-\033[38;2;255;200;140m[</>] \033[38;2;200;160;255mNhóm Telegram: \033[38;2;120;255;220mhttps://t.me/se_meo_bao_an
-\033[38;2;190;235;210m───────────────────────────────────────────────────────────────────────\033[0m
-"""
-    print(banner_text)
-
-
-def load_config():
-    if os.path.exists(CONFIG_FILE):
-        try:
-            with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
-                config = json.load(f)
-            return config
-        except:
-            pass
-    return None
-
-
-def save_config(config):
-    try:
-        with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
-            json.dump(config, f, ensure_ascii=False, indent=2)
-        return True
     except:
         return False
 
+def is_windows():
+    """Kiểm tra xem có đang chạy trên Windows không"""
+    return os.name == 'nt'
 
-def input_number(text, default):
-    while True:
-        try:
-            value = input(text).strip()
-            if value == "":
-                return default
-            return int(value)
-        except:
-            console.print(u"[bold #ff4d6d]Sai định dạng! Nhập số.[/")
+# Xác định môi trường
+RUNNING_IN_TERMUX = is_termux()
+RUNNING_IN_WINDOWS = is_windows()
+
+# ========== CẤU HÌNH LƯU TRỮ ==========
+DATA_FOLDER = "data"
+os.makedirs(DATA_FOLDER, exist_ok=True)
+ACCOUNTS_SAVE_FILE = os.path.join(DATA_FOLDER, "saved_accounts.json")
+AUTH_FILE = os.path.join(DATA_FOLDER, "Authorization.json")
+GOLIKE_SELECTION_FILE = os.path.join(DATA_FOLDER, "golike_selection.json")
+
+# Lock toàn cục cho đa luồng ổn định
+global_lock = threading.RLock()
+driver_locks = defaultdict(threading.Lock)
 
 
-def setup_delay_config():
-    delay_config = DEFAULT_DELAY_CONFIG.copy()
-    saved_config = load_config()
-    if saved_config:
-        delay_config.update(saved_config.get('delay_config', {}))
+# ========== HÀM LẤY THÔNG TIN USER TỪ GOLIKE ==========
+def get_user_me(auth_token, session=None):
+    """Gọi API /users/me để lấy thông tin user từ Golike"""
+    if session is None:
+        session = requests.Session()
     
-    delay_like = [delay_config['like'][0], delay_config['like'][1]]
-    delay_follow = [delay_config['follow'][0], delay_config['follow'][1]]
-    delay_comment = [delay_config['comment'][0], delay_config['comment'][1]]
-    delay_job = [delay_config['job'][0], delay_config['job'][1]]
-    delay_fav = [delay_config['favorite'][0], delay_config['favorite'][1]]
-    nuoi_nick = delay_config.get('nuoi_nick', 2)
-    share_rate = delay_config.get('share_rate', 15)
-    loc_follow = delay_config.get('loc_follow', 0)
-    delay_done = delay_config.get('delay_done', 9)
-    force_stop_enabled = saved_config.get('force_stop_enabled', False) if saved_config else False
-    force_stop_after = saved_config.get('force_stop_after', 0) if saved_config else 0
-    
-    force_stop = "Yes" if force_stop_enabled else "No"
-    stop_job = force_stop_after
-    
-    while True:
-        table = Table(
-            title="[#ffffff]Delay [#00ffff]Config[/]",
-            box=box.SQUARE,
-            border_style="#ff9ecb",
-            show_lines=True,
-            pad_edge=False
-        )
-
-        table.add_column("Name", justify="left", header_style="#ff9ecb")
-        table.add_column("Min", justify="center", header_style="#ffffff")
-        table.add_column("Max", justify="center", header_style="#00ffff")
-
-        def row(name, val, c1, c2, c3):
-            return [
-                u"[bold {}]{}[/]".format(c1, name),
-                u"[bold {}]{}[/][#aaaaaa]s[/]".format(c2, val[0]),
-                u"[bold {}]{}[/][#aaaaaa]s[/]".format(c3, val[1])
-            ]
-
-        table.add_row(*row("Delay Like", delay_like, "#ff4d6d", "#ffd1dc", "#ff8fa3"))
-        table.add_row(*row("Delay Follow", delay_follow, "#00c853", "#b9f6ca", "#69f0ae"))
-        table.add_row(*row("Delay Comment", delay_comment, "#00b0ff", "#80d8ff", "#40c4ff"))
-        table.add_row(*row("Delay Get Jobs", delay_job, "#ff9100", "#ffd180", "#ffab40"))
-        table.add_row(*row("Delay Favorite", delay_fav, "#a78bfa", "#c4b5fd", "#b388ff"))
-
-        table.add_row(
-            u"[#9b59b6]Số video nuôi nick[/]",
-            u"[bold #ffffff]{}[/]".format(nuoi_nick),
-            u"[#00ffff]video[/]"
-        )
-        
-        table.add_row(
-            u"[#ff69b4]Tỷ lệ Copy Link[/]",
-            u"[bold #ffffff]{}[/]".format(share_rate),
-            u"[#00ffff]%[/]"
-        )
-
-        table.add_row(
-            u"[#ff9ecb]Lọc Follow[/]",
-            u"[#ffffff]{}[/]".format(loc_follow),
-            u"[#00ffff]ON/OFF[/]"
-        )
-
-        table.add_row(
-            u"[#ffd54f]Delay Hoàn Thành[/]",
-            u"[bold #ffffff]{}[/]".format(delay_done),
-            u"[#00ffff]s[/]"
-        )
-
-        table.add_row(
-            u"[#ff4d6d]Buộc Dừng chạy[/]",
-            u"[#ffffff]{}[/]".format(force_stop),
-            u"[#aaaaaa]-[/]"
-        )
-
-        table.add_row(
-            u"[#00b0ff]Số Job Buộc dừng[/]",
-            u"[bold #ffffff]{}[/]".format(stop_job),
-            u"[#aaaaaa]-[/]"
-        )
-
-        console.clear()
-        banner()
-        console.print(table)
-
-        console.print(
-            u"\n[#ff9ecb]➤ [#ffffff]Dùng lại config?[/] [#00ffff](Y/N)[/] ():",
-            end=""
-        )
-        choice = input().strip().lower()
-
-        if choice != "n":
-            break
-
-        console.print(u"\n[bold #ffd54f] Nhập lại cấu hình[/]\n")
-
-        delay_like = [
-            input_number(u"Delay Like Min ({}): ".format(delay_like[0]), delay_like[0]),
-            input_number(u"Delay Like Max ({}): ".format(delay_like[1]), delay_like[1])
-        ]
-
-        delay_follow = [
-            input_number(u"Delay Follow Min ({}): ".format(delay_follow[0]), delay_follow[0]),
-            input_number(u"Delay Follow Max ({}): ".format(delay_follow[1]), delay_follow[1])
-        ]
-
-        delay_comment = [
-            input_number(u"Delay Comment Min ({}): ".format(delay_comment[0]), delay_comment[0]),
-            input_number(u"Delay Comment Max ({}): ".format(delay_comment[1]), delay_comment[1])
-        ]
-
-        delay_job = [
-            input_number(u"Delay Get Jobs Min ({}): ".format(delay_job[0]), delay_job[0]),
-            input_number(u"Delay Get Jobs Max ({}): ".format(delay_job[1]), delay_job[1])
-        ]
-
-        delay_fav = [
-            input_number(u"Delay Favorite Min ({}): ".format(delay_fav[0]), delay_fav[0]),
-            input_number(u"Delay Favorite Max ({}): ".format(delay_fav[1]), delay_fav[1])
-        ]
-
-        nuoi_nick = input_number(u"Số video nuôi nick ({}): ".format(nuoi_nick), nuoi_nick)
-        share_rate = input_number(u"Tỷ lệ Copy Link (0-100%) ({}): ".format(share_rate), share_rate)
-        loc_follow = input_number(u"Lọc Follow (0 = OFF) ({}): ".format(loc_follow), loc_follow)
-        delay_done = input_number(u"Delay Hoàn Thành ({}): ".format(delay_done), delay_done)
-
-        force_stop_input = input(u"Buộc dừng chạy (y/n): ").strip().lower()
-        force_stop_enabled = (force_stop_input == "y")
-        force_stop = "Yes" if force_stop_enabled else "No"
-        stop_job = input_number(u"Số job buộc dừng ({}): ".format(stop_job), stop_job)
-
-    delay_config = {
-        'like': delay_like,
-        'follow': delay_follow,
-        'comment': delay_comment,
-        'favorite': delay_fav,
-        'job': delay_job,
-        'delay_done': delay_done,
-        'loc_follow': loc_follow,
-        'nuoi_nick': nuoi_nick,
-        'share_rate': share_rate
-    }
-    
-    config = {
-        'delay_config': delay_config,
-        'min_follow_price': loc_follow,
-        'force_stop_enabled': force_stop_enabled,
-        'force_stop_after': stop_job
-    }
-    
-    save_config(config)
-    return delay_config, loc_follow, force_stop_enabled, stop_job
-
-
-def render_tablet(selections, current_idx):
-    JOBS = [
-        {"id": "like", "name": "Like", "color": "#ff9ecb"},
-        {"id": "follow", "name": "Follow", "color": "#ffd54f"},
-        {"id": "comment", "name": "Comment", "color": "#00ffff"},
-        {"id": "favorite", "name": "Favorite", "color": "#a78bfa"}
-    ]
-    
-    table = Table(
-        box=box.ROUNDED, 
-        border_style="#d7b8ff", 
-        header_style="bold #ffffff",
-        width=45,
-        title="[bold #ff9ecb] CHỌN NHIỆM VỤ[/]",
-        show_lines=True
-    )
-    
-    table.add_column("STT", justify="center", style="bold", width=5)
-    table.add_column(u"Nhiệm Vụ", width=15)
-    table.add_column(u"Trạng Thái", justify="center", width=12)
-
-    for i, job in enumerate(JOBS):
-        color = job["color"]
-        
-        if selections[i] == 'y':
-            status = "[bold #00ff9c]✓ Đã chọn[/]"
-        elif selections[i] == 'n':
-            status = "[bold #ff4d6d]✗ Bỏ qua[/]"
-        elif i == current_idx:
-            status = "[blink bold #ffff00]⏳ Đang chờ...[/]"
-        else:
-            status = "[dim]⏳ Chưa chọn[/]"
-
-        table.add_row(
-            u"[{}]{}[/]".format(color, i+1),
-            u"[{}]{}[/]".format(color, job['name']),
-            status
-        )
-    return table
-
-
-def menu_jobs():
-    JOBS = [
-        {"id": "like", "name": "Like", "color": "#ff9ecb"},
-        {"id": "follow", "name": "Follow", "color": "#ffd54f"},
-        {"id": "comment", "name": "Comment", "color": "#00ffff"},
-        {"id": "favorite", "name": "Favorite", "color": "#a78bfa"}
-    ]
-    
-    selections = [None] * len(JOBS)
-    
-    console.clear()
-    console.print(Panel(u"[bold cyan] CẤU HÌNH NHIỆM VỤ[/]", border_style="#ff9ecb", width=50))
-    console.print()
-    
-    for i, job in enumerate(JOBS):
-        while True:
-            console.clear()
-            console.print(render_tablet(selections, i))
-            
-            ans = console.input(u"\n[#ff9ecb]➤ [#ffffff]Bạn có muốn làm nhiệm vụ [bold]{}[/] không? (y/n) [y]: ".format(job['name'])).strip().lower()
-            
-            if ans in ['y', 'yes', '']:
-                selections[i] = 'y'
-                break
-            elif ans in ['n', 'no']:
-                selections[i] = 'n'
-                break
-            else:
-                console.print(u"[red]✗ Vui lòng nhập y hoặc n![/]", style="red")
-                time.sleep(1)
-
-    console.clear()
-    console.print(render_tablet(selections, -1))
-    
-    selected_jobs = [JOBS[i]["id"] for i in range(len(JOBS)) if selections[i] == 'y']
-    
-    if selected_jobs:
-        console.print(u"\n[#ffffff] Nhiệm vụ đã chọn:[/] [bold #00ffff]{}[/]".format(u', '.join(job['name'] for job in JOBS if job['id'] in selected_jobs)))
-    else:
-        console.print(u"\n[#ff4d6d]⚠ Không có nhiệm vụ nào được chọn! Tool sẽ thoát.[/]")
-        sys.exit(1)
-    
-    return selected_jobs
-
-
-def get_device_model_from_adb(device_obj):
-    try:
-        return device_obj.shell("getprop ro.product.model").strip()
-    except:
-        return "Unknown"
-
-
-def get_battery_from_adb(device_obj):
-    try:
-        info = device_obj.shell("dumpsys battery")
-        for line in info.splitlines():
-            if "level" in line:
-                return line.split(":")[1].strip()
-    except:
-        pass
-    return ""
-
-
-def show_devices_with_rich(multi_select=True):
-    console.clear()
-    banner()
-    table = Table(
-        title="[bold #ffffff] DANH SÁCH THIẾT BỊ ADB[/]",
-        border_style="#d7d7a8",
-        show_lines=True,
-        expand=False,
-        title_justify="center"
-    )
-
-    table.add_column("STT", justify="center", style="#e0e0e0", width=4)
-    table.add_column("Device ID", style="#00ff9c", width=20)
-    table.add_column("Product Model", style="#ffd54f", width=15)
-    table.add_column(u"🔋 Battery", justify="center", width=12)
-    table.add_column("TikTok Version", style="#a78bfa", width=15)
-    table.add_column("Status", style="#00ff99", width=10)
-
-    devices = adb.device_list()
-
-    if not devices:
-        console.print(Panel(u"[red]Không tìm thấy thiết bị ADB nào![/]", border_style="red"))
-        return []
-
-    versions = get_all_devices_versions(devices)
-
-    for i, d in enumerate(devices):
-        model = get_device_model_from_adb(d)
-        battery = get_battery_from_adb(d)
-        tiktok_version = versions.get(d.serial, "None")
-        
-        if battery:
-            try:
-                b = int(battery)
-                if b >= 80:
-                    battery_display = u"[bold green]█[/bold green]" * (b // 10) + u"[green]{}%[/green]".format(b)
-                elif b >= 50:
-                    battery_display = u"[bold yellow]█[/bold yellow]" * (b // 10) + u"[yellow]{}%[/yellow]".format(b)
-                elif b >= 20:
-                    battery_display = u"[bold orange1]█[/bold orange1]" * (b // 10) + u"[orange1]{}%[/orange1]".format(b)
-                else:
-                    battery_display = u"[bold red]█[/bold red]" * (b // 10) + u"[red]{}%[/red]".format(b)
-            except:
-                battery_display = u"[cyan]{}%[/cyan]".format(battery)
-        else:
-            battery_display = "[dim]N/A[/dim]"
-        
-        version_display = u"[#a78bfa]{}[/]".format(tiktok_version) if tiktok_version != "None" else "[dim]None[/]"
-
-        table.add_row(
-            str(i + 1),
-            u"[#00ff9c]{}[/]".format(d.serial),
-            u"[#ffd54f]{}[/]".format(model),
-            battery_display,
-            version_display,
-            u"[#00ff99]● Online[/]"
-        )
-
-    console.print(table)
-    console.print()
-    
-    if multi_select:
-        console.print(u"[#ff9ecb]➤ [#99ff99]Nhập STT [#ffffff][[#ff99cc] cách nhau bằng dấu phẩy, VD: 1,2,3[#ffffff] ] [#ffffff]hoặc nhập 0 để chọn tất cả: [/]", end="")
-    else:
-        console.print(u"[#ff9ecb]➤ [#ffffff]Nhập STT thiết bị: [/]", end="")
-    
-    return devices
-
-
-def select_devices():
-    devices = show_devices_with_rich(multi_select=True)
-    if not devices:
-        return []
-    
-    while True:
-        try:
-            choice = input().strip()
-            
-            if choice == "0":
-                selected_serials = [d.serial for d in devices]
-                console.print(u"[green]✓ Đã chọn tất cả {} thiết bị[/]".format(len(selected_serials)))
-                return selected_serials
-            
-            indices = []
-            for part in choice.split(','):
-                part = part.strip()
-                if part.isdigit():
-                    idx = int(part) - 1
-                    if 0 <= idx < len(devices):
-                        indices.append(idx)
-                elif '-' in part and len(part) > 1:
-                    try:
-                        start, end = part.split('-')
-                        start_idx = int(start) - 1
-                        end_idx = int(end) - 1
-                        for idx in range(start_idx, end_idx + 1):
-                            if 0 <= idx < len(devices):
-                                indices.append(idx)
-                    except:
-                        pass
-            if indices:
-                selected_serials = [devices[idx].serial for idx in set(indices)]
-                console.print(u"[green]✓ Đã chọn {} thiết bị[/]".format(len(selected_serials)))
-                return selected_serials
-            else:
-                console.print(u"[red]Không có thiết bị nào được chọn![/]")
-        except:
-            pass
-
-
-def get_user_me(auth_token, session):
     headers = {
         'Accept-Language': 'vi,en-US;q=0.9,en;q=0.8',
         'Referer': 'https://app.golike.net/',
@@ -2182,7 +100,7 @@ def get_user_me(auth_token, session):
     }
     
     try:
-        response = session.get('https://gateway.golike.net/api/users/me', headers=headers, timeout=25)
+        response = session.get('https://gateway.golike.net/api/users/me', headers=headers, timeout=30, verify=False)
         
         try:
             response_json = response.json()
@@ -2198,32 +116,35 @@ def get_user_me(auth_token, session):
                 "coin": data.get("coin", 0)
             }
         else:
-            error_msg = response_json.get("message", u"HTTP {}".format(response.status_code))
+            error_msg = response_json.get("message", f"HTTP {response.status_code}")
             return {
                 "success": False,
                 "auth": auth_token,
                 "message": error_msg
             }
-    except:
+    except Exception as e:
         return {
             "success": False,
             "auth": auth_token,
-            "message": "Connection error"
+            "message": str(e)
         }
 
 
 def read_authorizations():
+    """Đọc danh sách Authorization từ file"""
     try:
         if os.path.exists(AUTH_FILE):
             with open(AUTH_FILE, 'r', encoding='utf-8') as f:
                 data = json.load(f)
                 return data.get('tokens', [])
         return []
-    except:
+    except Exception as e:
+        console.print(f"[red]Lỗi đọc file auth: {str(e)}[/]")
         return []
 
 
 def save_authorization(auth):
+    """Lưu Authorization mới vào file"""
     try:
         current_auths = read_authorizations()
         if auth not in current_auths:
@@ -2232,51 +153,761 @@ def save_authorization(auth):
                 json.dump({"tokens": current_auths}, f, ensure_ascii=False, indent=2)
             return True
         return False
-    except:
+    except Exception as e:
+        console.print(f"[red]Lỗi lưu auth: {str(e)}[/]")
         return False
 
 
-def display_auth_menu():
-    console.clear()
-    banner()
-    
-    accounts = []
+def delete_authorization(index):
+    """Xóa Authorization theo index"""
+    try:
+        current_auths = read_authorizations()
+        if 0 <= index < len(current_auths):
+            removed = current_auths.pop(index)
+            with open(AUTH_FILE, 'w', encoding='utf-8') as f:
+                json.dump({"tokens": current_auths}, f, ensure_ascii=False, indent=2)
+            return True, removed
+        return False, None
+    except Exception as e:
+        console.print(f"[red]Lỗi xóa auth: {str(e)}[/]")
+        return False, None
+
+
+def load_all_accounts():
+    """Load tất cả accounts và lấy thông tin từ API /users/me"""
     auth_tokens = read_authorizations()
     
     if not auth_tokens:
-        console.print(u"⚠ Chưa có Authorization nào! Vui lòng nhập Authorization.")
-        new_auth = console.input(u"✈ Nhập Authorization: ").strip()
-        if new_auth:
-            save_authorization(new_auth)
-            return new_auth
-        else:
-            console.print(u"Authorization không được để trống!")
-            sys.exit(1)
+        return []
     
-    session = get_global_session()
-    for token in auth_tokens:
-        result = get_user_me(token, session)
-        accounts.append(result)
+    session = requests.Session()
+    results = []
+    
+    with ThreadPoolExecutor(max_workers=5) as executor:
+        futures = {executor.submit(get_user_me, token, session): token for token in auth_tokens}
+        for future in as_completed(futures):
+            result = future.result()
+            results.append(result)
+    
+    return results
+
+
+def save_golike_selection(selected_indices):
+    """Lưu lựa chọn nick Golike vào file"""
+    try:
+        with open(GOLIKE_SELECTION_FILE, 'w', encoding='utf-8') as f:
+            json.dump({"selected_indices": selected_indices}, f, ensure_ascii=False, indent=2)
+        return True
+    except Exception as e:
+        console.print(f"[red]Lỗi lưu lựa chọn Golike: {str(e)}[/]")
+        return False
+
+
+def load_golike_selection():
+    """Đọc lựa chọn nick Golike từ file"""
+    try:
+        if os.path.exists(GOLIKE_SELECTION_FILE):
+            with open(GOLIKE_SELECTION_FILE, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                return data.get("selected_indices", [])
+        return []
+    except Exception as e:
+        return []
+
+
+# ========== MENU QUẢN LÝ AUTHORIZATION VÀ CHỌN NHIỀU NICK GOLIKE ==========
+def display_auth_and_select_accounts():
+    """Hiển thị menu quản lý Authorization và cho phép chọn nhiều nick Golike"""
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    
+    while True:
+        accounts = load_all_accounts()
+        
+        console.clear()
+        banner()
+        
+        if accounts:
+            acc_lines = []
+            for i, acc in enumerate(accounts):
+                idx = f"{i+1:02d}"
+                
+                if acc.get("success"):
+                    username = acc.get("username", "Unknown")
+                    coin = acc.get("coin", 0)
+                    line = f"[#00ffff][{idx}][/] [#ff99cc]{username}[/] | [#99ff99]{coin} coin[/]"
+                else:
+                    msg = acc.get('message', 'Lỗi hệ thống')[:30]
+                    line = f"[#00ffff][{idx}][/] [red]ERROR:[/] [#ff4444]{msg}[/]"
+                
+                acc_lines.append(line)
+            
+            acc_content = "\n".join(acc_lines)
+        else:
+            acc_content = "[#ffa56b]⚠ Chưa có Authorization nào! Vui lòng nhập token.[/#ffa56b]"
+        
+        panel_acc = Panel(
+            acc_content,
+            title="[bold #d7d7a8]DS TÀI KHOẢN GOLIKE[/]",
+            title_align="center",
+            border_style="#d7d7a8",
+            padding=(0, 1),
+            width=60
+        )
+        console.print(panel_acc)
+        
+        panel_input = Panel(
+            '[#cccccc]Lệnh: [#ff9ecb]"t" [#d7d7a8]thêm Authorization, [#ffd4b8]"d 1,2,3" xóa Authorization, [#ff9ecb]"r" [#99ff99]load lại [#ff9ecb]"1,2,3" [#00ffff]chọn nick Golike cách nhau bằng dấu phẩy [#ff6b6b]Enter [#99ff99]để tiếp tục với nick đã chọn[/]',
+            border_style="#d7d7a8",
+            padding=(0, 1),
+            width=80
+        )
+        console.print(panel_input)
+        
+        console.print("[#ff9ecb]➤ [#ffffff]Lựa chọn: [/]", end="")
+        choice = input().strip().lower()
+        
+        if choice == '':
+            valid_accounts = [acc for acc in accounts if acc.get("success")]
+            if valid_accounts:
+                saved_selection = load_golike_selection()
+                selected_accounts = []
+                for idx in saved_selection:
+                    if 0 <= idx < len(accounts) and accounts[idx].get("success"):
+                        selected_accounts.append(accounts[idx])
+                
+                if selected_accounts:
+                    console.print(f"[green] Đã chọn {len(selected_accounts)} nick Golike từ lưu trữ[/]")
+                    time.sleep(1)
+                    return selected_accounts
+                else:
+                    console.print("[red] Chưa chọn nick Golike nào! Vui lòng chọn.[/]")
+                    time.sleep(2)
+                    continue
+            else:
+                console.print("[red] Không có tài khoản hợp lệ nào! Vui lòng thêm token mới.[/]")
+                time.sleep(2)
+                continue
+                
+        elif choice == 't':
+            console.print("\n[#6bb8ff]✈ Nhập Authorization mới: [/]", end="")
+            new_auth = input().strip()
+            if not new_auth:
+                console.print("[red]Authorization không được để trống![/]")
+                time.sleep(1.5)
+                continue
+            
+            console.print("[yellow]Đang kiểm tra token...[/]")
+            session = requests.Session()
+            result = get_user_me(new_auth, session)
+            
+            if result.get("success"):
+                console.print(f"[green]✓ Token hợp lệ! Xin chào: [bold]{result['username']}[/bold] | {result['coin']} coin[/]")
+                save_authorization(new_auth)
+                console.print("[green]✓ Đã lưu token thành công![/]")
+            else:
+                console.print(f"[red]✗ Token không hợp lệ! Lỗi: {result.get('message', 'Unknown error')}[/]")
+                confirm = input("Token không hợp lệ, bạn vẫn muốn lưu? (y/n): ").strip().lower()
+                if confirm == 'y':
+                    save_authorization(new_auth)
+                    console.print("[yellow]✓ Đã lưu token (dù không hợp lệ)[/]")
+            
+            time.sleep(2)
+            continue
+            
+        elif choice.startswith('d'):
+            parts = choice.split()
+            if len(parts) >= 2:
+                try:
+                    indices = [int(x.strip()) - 1 for x in parts[1].split(',') if x.strip().isdigit()]
+                    for idx in sorted(indices, reverse=True):
+                        success, removed = delete_authorization(idx)
+                        if success:
+                            console.print(f"[green]✓ Đã xóa token[/]")
+                        else:
+                            console.print(f"[red]✗ Không tìm thấy token thứ {idx+1}[/]")
+                except Exception as e:
+                    console.print(f"[red]Lỗi: {str(e)}[/]")
+            else:
+                console.print("[yellow]Cú pháp: d 1,2,3 để xóa token theo số thứ tự[/]")
+            time.sleep(2)
+            continue
+            
+        elif choice == 'r':
+            continue
+            
+        elif ',' in choice or choice.isdigit():
+            try:
+                indices = [int(x.strip()) - 1 for x in choice.split(',') if x.strip().isdigit()]
+                selected_accounts = []
+                for idx in indices:
+                    if 0 <= idx < len(accounts):
+                        acc = accounts[idx]
+                        if acc.get("success"):
+                            selected_accounts.append(acc)
+                        else:
+                            console.print(f"[red]✗ Tài khoản thứ {idx+1} không hợp lệ![/]")
+                    else:
+                        console.print(f"[red]✗ Số {idx+1} không hợp lệ! (1-{len(accounts)})[/]")
+                
+                if selected_accounts:
+                    console.print(f"[green]✓ Đã chọn {len(selected_accounts)} nick Golike:[/]")
+                    for acc in selected_accounts:
+                        console.print(f"   - [cyan]{acc['username']}[/] | [yellow]{acc['coin']} coin[/]")
+                    
+                    save_golike_selection(indices)
+                    time.sleep(2)
+                    return selected_accounts
+                else:
+                    console.print("[red]✗ Không có tài khoản hợp lệ nào được chọn![/]")
+                    time.sleep(2)
+                    continue
+            except Exception as e:
+                console.print(f"[red]Lỗi: {str(e)}[/]")
+                time.sleep(2)
+                continue
+            
+        else:
+            console.print(f"[red]Lựa chọn không hợp lệ![/]")
+            time.sleep(1.5)
+            continue
+
+
+# ========== KIỂM TRA SELENIUM ==========
+def check_and_install_selenium():
+    """Kiểm tra và cài đặt selenium nếu chưa có"""
+    try:
+        import selenium
+        return True
+    except ImportError:
+        print("\033[1;33mSelenium chưa được cài đặt. Đang tiến hành cài đặt...")
+        try:
+            subprocess.check_call([sys.executable, "-m", "pip", "install", "selenium"])
+            print("\033[1;32mĐã cài đặt selenium thành công!")
+            return True
+        except:
+            print("\033[1;31mKhông thể cài đặt selenium. Vui lòng cài thủ công: pip install selenium")
+            return False
+
+
+# ========== TÌM ĐƯỜNG DẪN CHROME/CHROMIUM VÀ CHROMEDRIVER TRONG TERMUX ==========
+def find_chrome_in_termux():
+    """Tìm đường dẫn Chrome/Chromium trong Termux"""
+    possible_paths = [
+        '/data/data/com.termux/files/usr/bin/chromium',
+        '/data/data/com.termux/files/usr/bin/chromium-browser',
+        '/data/data/com.termux/files/usr/bin/chrome',
+        '/data/data/com.termux/files/usr/bin/brave',
+        '/data/data/com.termux/files/usr/bin/chromium-android',
+        '/system/bin/chromium',
+        '/system/bin/chrome'
+    ]
+    
+    try:
+        result = subprocess.run(['which', 'chromium'], capture_output=True, text=True)
+        if result.returncode == 0 and result.stdout.strip():
+            return result.stdout.strip()
+    except:
+        pass
+    
+    try:
+        result = subprocess.run(['which', 'chromium-browser'], capture_output=True, text=True)
+        if result.returncode == 0 and result.stdout.strip():
+            return result.stdout.strip()
+    except:
+        pass
+    
+    for path in possible_paths:
+        if os.path.exists(path):
+            return path
+    
+    return None
+
+def find_chromedriver_in_termux():
+    """Tìm đường dẫn chromedriver trong Termux"""
+    termux_chromedriver = '/data/data/com.termux/files/usr/bin/chromedriver'
+    if os.path.exists(termux_chromedriver):
+        return termux_chromedriver
+    
+    possible_paths = [
+        '/data/data/com.termux/files/usr/bin/chromedriver',
+        '/data/data/com.termux/files/usr/bin/chromium-driver',
+        '/data/data/com.termux/files/usr/bin/chrome-driver',
+        '/system/bin/chromedriver',
+        '/system/bin/chrome-driver'
+    ]
+    
+    try:
+        result = subprocess.run(['which', 'chromedriver'], capture_output=True, text=True)
+        if result.returncode == 0 and result.stdout.strip():
+            return result.stdout.strip()
+    except:
+        pass
+    
+    for path in possible_paths:
+        if os.path.exists(path):
+            return path
+    
+    return None
+
+
+# ========== KIỂM TRA CHROME ĐÃ CÀI ĐẶT CHƯA ==========
+def check_chrome_installed(account_data=None):
+    """Kiểm tra Chrome/Chromium đã được cài đặt chưa"""
+    if RUNNING_IN_TERMUX:
+        chrome_path = find_chrome_in_termux()
+        if chrome_path:
+            if account_data:
+                update_account_status(account_data, f"Tìm thấy Chromium")
+            return True, chrome_path
+        else:
+            if account_data:
+                update_account_status(account_data, "Không tìm thấy Chromium", "error")
+            return False, None
+    else:
+        try:
+            options = Options()
+            options.add_argument('--headless=new')
+            options.add_argument('--no-sandbox')
+            test_driver = webdriver.Chrome(options=options)
+            test_driver.quit()
+            return True, None
+        except:
+            return False, None
+
+def check_chromedriver_installed(account_data=None):
+    """Kiểm tra chromedriver đã được cài đặt chưa"""
+    if RUNNING_IN_TERMUX:
+        chromedriver_path = find_chromedriver_in_termux()
+        if chromedriver_path:
+            if account_data:
+                update_account_status(account_data, f"Tìm thấy ChromeDriver")
+            return chromedriver_path
+        else:
+            if account_data:
+                update_account_status(account_data, "Không tìm thấy ChromeDriver", "error")
+            return None
+    return None
+
+
+# Danh sách User-Agent cho Instagram
+USER_AGENTS = [
+    'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36',
+    'Mozilla/5.0 (Linux; Android 11; SM-G998B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36',
+    'Mozilla/5.0 (Linux; Android 12; SM-S908E) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36',
+    'Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36',
+    'Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1',
+]
+
+def get_random_user_agent():
+    """Trả về một User-Agent ngẫu nhiên từ danh sách"""
+    return random.choice(USER_AGENTS)
+
+
+# ========== HÀM LẤY USERNAME TỪ COOKIE ==========
+def get_username_from_cookie(cookie_str):
+    """Lấy username từ cookie Instagram bằng requests"""
+    try:
+        cookies = {}
+        for item in cookie_str.split(';'):
+            item = item.strip()
+            if not item:
+                continue
+            if '=' in item:
+                key, val = item.split('=', 1)
+                cookies[key] = val
+        
+        session = requests.Session()
+        session.cookies.update(cookies)
+        session.headers.update({
+            'User-Agent': get_random_user_agent(),
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.5',
+        })
+        
+        response = session.get('https://www.instagram.com/', timeout=15, verify=False)
+        
+        match = re.search(r'"username":"([^"]+)"', response.text)
+        if match:
+            return match.group(1)
+        
+        match = re.search(r'"logged_in_user"\s*:\s*\{[^}]*"username"\s*:\s*"([^"]+)"', response.text)
+        if match:
+            return match.group(1)
+        
+        match = re.search(r'https://www\.instagram\.com/([^/"]+)/', response.text)
+        if match:
+            return match.group(1)
+        
+        return None
+    except Exception:
+        return None
+
+
+# ========== HÀM LƯU/ TẢI ACCOUNTS ==========
+def save_accounts_to_file(ui_accounts):
+    """Lưu danh sách accounts đã nhập cookie vào file JSON"""
+    try:
+        save_data = []
+        for acc in ui_accounts:
+            save_data.append({
+                "username": acc.get("username"),
+                "account_id": acc.get("account_id"),
+                "cookie": acc.get("cookie"),
+                "golike_username": acc.get("golike_username"),
+                "status": acc.get("status"),
+                "is_valid": acc.get("is_valid", False),
+                "saved_at": get_current_time().strftime("%Y-%m-%d %H:%M:%S")
+            })
+        
+        with open(ACCOUNTS_SAVE_FILE, 'w', encoding='utf-8') as f:
+            json.dump(save_data, f, ensure_ascii=False, indent=2)
+        return True
+    except Exception as e:
+        console.print(f"[#ff6b6b]Lỗi lưu accounts: {str(e)}[/#ff6b6b]")
+        return False
+
+def load_accounts_from_file():
+    """Tải danh sách accounts từ file JSON"""
+    try:
+        if os.path.exists(ACCOUNTS_SAVE_FILE):
+            with open(ACCOUNTS_SAVE_FILE, 'r', encoding='utf-8') as f:
+                save_data = json.load(f)
+            
+            ui_accounts = []
+            for acc in save_data:
+                ui_accounts.append({
+                    "username": acc.get("username"),
+                    "account_id": acc.get("account_id"),
+                    "cookie": acc.get("cookie"),
+                    "golike_username": acc.get("golike_username"),
+                    "status": acc.get("status", "[#6bffb8]Đã lưu[/#6bffb8]"),
+                    "is_valid": acc.get("is_valid", False),
+                    "saved_at": acc.get("saved_at", "")
+                })
+            return ui_accounts
+        return []
+    except Exception as e:
+        console.print(f"[#ff6b6b]Lỗi tải accounts: {str(e)}[/#ff6b6b]")
+        return []
+
+def init_data_folder():
+    """Khởi tạo thư mục data và file README"""
+    if not os.path.exists(DATA_FOLDER):
+        os.makedirs(DATA_FOLDER)
+        readme_content = """# Thư mục lưu trữ dữ liệu Instagram Tool
+
+## Các file trong thư mục:
+- `saved_accounts.json`: Lưu danh sách accounts đã nhập cookie
+- `Authorization.json`: Lưu danh sách Authorization Golike
+- `golike_selection.json`: Lưu lựa chọn nick Golike
+- Các file `cookies_*.txt`: Backup cookie cho từng account
+
+## Lệnh quản lý trong tool:
+- `add`: Thêm cookie mới
+- `save`: Lưu danh sách accounts hiện tại
+- `load`: Tải danh sách accounts đã lưu
+- `1,2,3`: Chọn account để chạy
+- `-1,2`: Xóa account
+- `run`: Bắt đầu chạy
+
+© Tool Instagram Auto
+"""
+        with open(os.path.join(DATA_FOLDER, "README.md"), 'w', encoding='utf-8') as f:
+            f.write(readme_content)
+
+init_data_folder()
+
+
+# ========== Xử lý Timezone an toàn ==========
+try:
+    from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+    try:
+        VIETNAM_TZ = ZoneInfo("Asia/Ho_Chi_Minh")
+    except ZoneInfoNotFoundError:
+        try:
+            import tzdata
+            VIETNAM_TZ = ZoneInfo("Asia/Ho_Chi_Minh")
+        except (ImportError, Exception):
+            VIETNAM_TZ = timezone.utc
+except ImportError:
+    VIETNAM_TZ = timezone.utc
+
+def get_current_time():
+    """Lấy thời gian hiện tại theo múi giờ Việt Nam (hoặc UTC nếu không có)"""
+    return datetime.now(VIETNAM_TZ)
+
+
+# ========== Hàm kiểm tra an toàn ==========
+def safe_get(data, key, default=None):
+    """Lấy giá trị từ dict một cách an toàn, tránh lỗi khi data không phải dict"""
+    if isinstance(data, dict):
+        return data.get(key, default)
+    return default
+
+def safe_get_nested(data, *keys, default=None):
+    """Lấy giá trị nested từ dict một cách an toàn"""
+    current = data
+    for key in keys:
+        if not isinstance(current, dict):
+            return default
+        current = current.get(key)
+        if current is None:
+            return default
+    return current
+
+
+# ========== Lấy IP thật từ API ==========
+def get_public_ip():
+    """
+    Lấy địa chỉ IP public thật từ API ipify.org
+    Nếu lỗi trả về "Không xác định"
+    """
+    try:
+        response = requests.get("https://api.ipify.org?format=json", timeout=10, verify=False)
+        if response.status_code == 200:
+            data = response.json()
+            return data.get("ip", "Không xác định")
+        return "Không xác định"
+    except:
+        return "Không xác định"
+
+
+# ========== Cấu hình an toàn ==========
+MAX_SESSION_ERRORS = 5
+ERROR_RESET_TIME = 1800
+MAX_RETRY_COUNT = 2
+RATE_LIMIT_BACKOFF = [5, 15, 30]
+
+# ========== Biến toàn cục ==========
+all_accounts_data = {}
+stop_threads = False
+thread_status = {}
+account_locks = defaultdict(threading.RLock)
+bot_instances = {}
+system_status = {"message": "Đang khởi động...", "level": "info"}
+
+# Thêm lock cho API calls để tránh đá nhau
+api_lock = threading.RLock()
+
+
+# ========== Hàm cập nhật trạng thái ==========
+def update_account_status(account_data, message, level="info"):
+    """Cập nhật trạng thái chi tiết cho account"""
+    with account_locks.get(account_data.get("id", "unknown"), threading.RLock()):
+        if len(message) > 50:
+            message = message[:47] + "..."
+        account_data["detail_status"] = message
+        account_data["status"] = message
+        if "thành công" not in message.lower() and "" not in message:
+            account_data["api_message"] = message[:45]
+
+def update_system_status(message, level="info"):
+    """Cập nhật trạng thái hệ thống"""
+    global system_status
+    system_status = {"message": message, "level": level}
+
+
+# ========== HÀM TRÍCH XUẤT USERNAME TỪ JOB DATA ==========
+def extract_username_from_job_data(data):
+    """
+    Trích xuất username từ job data của Golike
+    Xử lý linh hoạt với nhiều định dạng dữ liệu khác nhau
+    KHÔNG dùng API Instagram hay regex từ page_source
+    CHỈ lấy từ job data
+    """
+    if not isinstance(data, dict):
+        return None
+
+    username = None
+    object_data = data.get("object_data")
+
+    if isinstance(object_data, str):
+        try:
+            object_data = json.loads(object_data)
+        except:
+            object_data = {}
+
+    if isinstance(object_data, dict):
+        for key in ["username", "instagram_username", "target_username", "name"]:
+            username = object_data.get(key)
+            if username and str(username).strip():
+                return str(username).strip().replace("@", "")
+
+    for key in ["username", "target_username"]:
+        username = data.get(key)
+        if username and str(username).strip():
+            return str(username).strip().replace("@", "")
+
+    link = data.get("link")
+    if link and isinstance(link, str):
+        import re
+        match = re.search(r"(?:www\.|m\.)?instagram\.com/([A-Za-z0-9._]+)", link)
+        if match:
+            username = match.group(1)
+            if username and username not in ["p", "reel", "stories", "explore", "tv", "accounts"]:
+                return username
+
+    return None
+
+
+# ========== HÀM TỰ ĐỘNG ADD GOLIKE ==========
+def get_target_uid(link_target, cookie_str):
+    """Hàm lấy UID dựa trên logic API V1 mới"""
+    headers_ig = {
+        'accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+        'accept-language': 'en-US,en;q=0.9,vi-VN;q=0.8,vi;q=0.7',
+        'sec-ch-ua': '"Google Chrome";v="141", "Not?A_Brand";v="8", "Chromium";v="141"',
+        'sec-fetch-dest': 'document',
+        'sec-fetch-mode': 'navigate',
+        'sec-fetch-site': 'none',
+        'user-agent': get_random_user_agent(),
+        'cookie': cookie_str,
+    }
+    try:
+        res = requests.get(link_target, headers=headers_ig, timeout=15, verify=False)
+        
+        lt = re.findall(r'"target_id":"(\d+)"', res.text)
+        if lt:
+            return lt[0]
+            
+        match = re.search(r'"profile_id":"(\d+)"', res.text)
+        if match:
+            return match.group(1)
+            
+        match2 = re.search(r'"id":"(\d+)","is_verified"', res.text)
+        if match2:
+            return match2.group(1)
+            
+        return None
+    except:
+        return None
+
+def auto_add_golike(username, cookie_str, headers_golike, golike_username):
+    """Hàm tự động thêm Golike sử dụng API V1 Follow - ĐÃ SỬA LỖI CHI TIẾT"""
+    console.print(f"[#ffa56b]➤ Account {username} chưa có trên Golike. Đang tiến hành thêm tự động vào nick [cyan]{golike_username}[/cyan]...[/#ffa56b]")
+    
+    console.print(f"[#6bb8ff]➤ Đang lấy link Verify từ API Golike...[/#6bb8ff]")
+    link_target = ""
+    try:
+        res_link = requests.get('https://gateway.golike.net/api/instagram-account', headers=headers_golike, timeout=15, verify=False)
+        
+        if res_link.status_code != 200:
+            try:
+                error_data = res_link.json()
+                error_msg = error_data.get('message') or error_data.get('msg') or f"HTTP {res_link.status_code}"
+            except:
+                error_msg = f"HTTP {res_link.status_code}"
+            console.print(f"[#ff6b6b]✗ Lỗi lấy link verify: {error_msg}[/#ff6b6b]")
+            return False, "-"
+        
+        link_target = res_link.json().get('link_verify_follow', '')
+        if link_target:
+            console.print(f"[#6bffb8]✓ Lấy thành công link verify: {link_target}[/#6bffb8]")
+        else:
+            console.print(f"[#ff6b6b]✗ API Golike không trả về link_verify_follow[/#ff6b6b]")
+            return False, "-"
+    except Exception as e:
+        console.print(f"[#ff6b6b]✗ Lỗi khi lấy link verify: {str(e)}[/#ff6b6b]")
+        return False, "-"
+
+    console.print(f"[#6bb8ff]➤ Đang lấy UID của mục tiêu...[/#6bb8ff]")
+    target_uid = get_target_uid(link_target, cookie_str)
+    
+    if not target_uid:
+        console.print(f"[#ff6b6b]✗ Lỗi: Không lấy được UID từ link {link_target}![/#ff6b6b]")
+        console.print(f"[dim]   → Cookie có thể đã hết hạn hoặc Instagram chặn[/dim]")
+        return False, "-"
+        
+    console.print(f"[#6bb8ff]➤ Đang follow ID {target_uid} bằng API V1...[/#6bb8ff]")
+    try:
+        csrf = cookie_str.split("csrftoken=")[1].split(';')[0] if "csrftoken=" in cookie_str else ""
+        
+        headers_follow = {
+            'accept': '*/*',
+            'accept-language': 'en-US,en;q=0.9,vi-VN;q=0.8,vi;q=0.7',
+            'content-type': 'application/x-www-form-urlencoded',
+            'origin': 'https://www.instagram.com',
+            'referer': 'https://www.instagram.com/',
+            'sec-ch-ua': '"Google Chrome";v="141", "Not?A_Brand";v="8", "Chromium";v="141"',
+            'user-agent': get_random_user_agent(),
+            'x-csrftoken': csrf,
+            'x-ig-app-id': '936619743392459',
+            'x-requested-with': 'XMLHttpRequest',
+            'cookie': cookie_str,
+        }
+        data_follow = {
+            'container_module': 'single_post',
+            'nav_chain': 'PolarisExploreRoot:exploreLandingPage:3:topnav-link,PolarisPostModal:postPage:4:modalLink',
+            'user_id': target_uid,
+            'jazoest': '22588',
+        }
+        res_follow = requests.post(
+            f'https://www.instagram.com/api/v1/friendships/create/{target_uid}/', 
+            headers=headers_follow, 
+            data=data_follow, 
+            timeout=15, 
+            verify=False
+        )
+        
+        if res_follow.status_code == 200 and 'friendship_status' in res_follow.text:
+            console.print(f"[#6bffb8] Follow thành công![/#6bffb8]")
+        else:
+            console.print(f"[#ff6b6b] Lỗi: Follow thất bại (Response: {res_follow.status_code})[/#ff6b6b]")
+            return False, "-"
+    except Exception as e:
+        console.print(f"[#ff6b6b] Lỗi thực thi Follow: {str(e)}[/#ff6b6b]")
+        return False, "-"
+    
+    console.print(f"[#6bb8ff]➤ Đợi 3 giây để Instagram ghi nhận Follow...[/#6bb8ff]")
+    time.sleep(3)
+        
+    console.print(f"[#6bb8ff]➤ Đang gửi yêu cầu Verify lên Golike...[/#6bb8ff]")
+    json_data = {'object_id': username}
+    
+    try:
+        res = requests.post('https://gateway.golike.net/api/instagram-account/verify-account', 
+                        headers=headers_golike, json=json_data, timeout=15, verify=False)
+        
+        try:
+            resp_json = res.json()
+        except:
+            resp_json = {}
+        
+        if res.status_code == 200 and (resp_json.get('status') == 200 or resp_json.get('success') == True):
+            new_acc_data = resp_json.get('data', {})
+            console.print(f"[bold #6bffb8]✓ Thêm và Match thành công {username} vào Golike![/bold #6bffb8]")
+            return True, new_acc_data.get('id', '-')
+        else:
+            error_msg = resp_json.get('message') or resp_json.get('msg') or f"HTTP {res.status_code}"
+            console.print(f"[#ff6b6b]✗ Lỗi từ Golike: {error_msg}[/#ff6b6b]")
+            return False, "-"
+    except Exception as e:
+        console.print(f"[#ff6b6b]✗ Lỗi kết nối API Golike Verify: {str(e)}[/#ff6b6b]")
+        return False, "-"
+
+
+# ========== HÀM HIỂN THỊ DANH SÁCH GOLIKE ĐỂ CHỌN ==========
+def display_golike_list_for_selection(golike_accounts):
+    """Hiển thị danh sách Golike để người dùng chọn"""
+    console.clear()
     
     acc_lines = []
-    for i, acc in enumerate(accounts):
-        idx = u"{:02d}".format(i+1)
-        
+    for i, acc in enumerate(golike_accounts):
+        idx = f"{i+1:02d}"
         if acc.get("success"):
             username = acc.get("username", "Unknown")
             coin = acc.get("coin", 0)
-            line = u"[#00ffff][{}][/] [#ff99cc]{}[/] | [#99ff99]{} coin[/]".format(idx, username, coin)
+            line = f"[#00ffff][{idx}][/] [#ff99cc]{username}[/] | [#99ff99]{coin} coin[/]"
         else:
-            msg = acc.get('message', u'Lỗi hệ thống')[:30]
-            line = u"[#00ffff][{}][/] [red]ERROR:[/] [#ff4444]{}[/]".format(idx, msg)
-        
+            msg = acc.get('message', 'Lỗi hệ thống')[:30]
+            line = f"[#00ffff][{idx}][/] [red]ERROR:[/] [#ff4444]{msg}[/]"
         acc_lines.append(line)
     
-    acc_content = u"\n".join(acc_lines)
+    acc_content = "\n".join(acc_lines)
     
     panel_acc = Panel(
         acc_content,
-        title="[bold #d7d7a8]DS TÀI KHOẢN GOLIKE[/]",
+        title="[bold #d7d7a8]CHỌN NICK GOLIKE ĐỂ LIÊN KẾT[/]",
         title_align="center",
         border_style="#d7d7a8",
         padding=(0, 1),
@@ -2284,271 +915,2105 @@ def display_auth_menu():
     )
     console.print(panel_acc)
     
-    panel_input = Panel(
-        u'[#cccccc]Enter để tiếp tục, nhập "t" để thêm tài khoản golike:[/]',
-        border_style="#d7d7a8",
-        padding=(0, 1),
-        width=80
-    )
-    console.print(panel_input)
-    
-    choice = console.input(u"[#ff9ecb]➤ [#ffffff]Lựa chọn: [/]").strip().lower()
-    
-    if choice == '':
-        valid_accounts = [acc for acc in accounts if acc.get("success")]
-        if valid_accounts:
-            return valid_accounts[0]["auth"]
-        else:
-            console.print(u"✗ Không có tài khoản hợp lệ nào!")
-            sys.exit(1)
-    elif choice == 't':
-        new_auth = console.input(u"\n[white]Authorization: [/]").strip()
-        if not new_auth:
-            console.print(u"Authorization không được để trống!")
-            time.sleep(1.5)
-            return display_auth_menu()
-        
-        console.print(u"Đang kiểm tra Authorization...")
-        session = get_global_session()
-        result = get_user_me(new_auth, session)
-        
-        if result.get("success"):
-            console.print(u"✓ Authorization hợp lệ! : {} | {} coin".format(result['username'], result['coin']))
-            save_authorization(new_auth)
-            time.sleep(1)
-            return new_auth
-        else:
-            console.print(u"✗ Authorization không hợp lệ! Lỗi: {}".format(result.get('message', 'Unknown error')))
-            confirm = input(u"Authorization không hợp lệ, bạn vẫn muốn lưu? (y/n): ").strip().lower()
-            if confirm == 'y':
-                save_authorization(new_auth)
-                return new_auth
-            return display_auth_menu()
-    elif choice.isdigit():
-        idx = int(choice) - 1
-        if 0 <= idx < len(accounts):
-            acc = accounts[idx]
-            if acc.get("success"):
-                return acc["auth"]
-            else:
-                console.print(u"✗ Tài khoản này không hợp lệ!")
-                time.sleep(1.5)
-                return display_auth_menu()
-        else:
-            console.print(u"Số không hợp lệ!")
-            time.sleep(1)
-            return display_auth_menu()
-    else:
-        console.print(u"Lựa chọn không hợp lệ!")
-        time.sleep(1)
-        return display_auth_menu()
-
-
-def build_dashboard_table():
-    table = Table(show_header=True, header_style="#ffffff", border_style="#ff9ecb", box=box.ROUNDED, show_lines=True)
-    
-    table.add_column("STT", justify="center", style="#ffd54f", width=4)
-    table.add_column("Device", style="#a78bfa", width=20)
-    table.add_column("usname", style="#00ffff", width=14)
-    table.add_column("Version", style="#ff9ecb", width=8)
-    table.add_column("Status", style="#ffffff", width=50)
-    table.add_column("Type", style="#38bdf8", width=8)
-    table.add_column(u"Xu", style="#ff9ecb", width=5)
-    table.add_column(u"Tổng", style="#facc15", width=6)
-    table.add_column("Done", style="#00ff9c", width=5)
-    table.add_column("Fail", style="#ff4d6d", width=5)
-    
-    with dashboard_lock:
-        devices_list = []
-        for acc_id, data in accounts_data.items():
-            last_update = data.get("last_update", 0)
-            devices_list.append((last_update, acc_id, data))
-        
-        devices_list.sort(key=lambda x: x[0], reverse=True)
-        
-        for i, (_, acc_id, data) in enumerate(devices_list, 1):
-            status = str(data.get("status", u"đang chờ..."))[:1000]
-            job_type = data.get("job_type", "")
-            msg_time = data.get("message_time", "")
-            time_display = u"[dim]{}[/dim] ".format(msg_time) if msg_time else ""
-            tiktok_version = data.get("tiktok_version") or "None"
-            version_display = tiktok_version[:10] if tiktok_version != "None" else "[dim]None[/]"
-            
-            if "error" in status.lower() or "lỗi" in status.lower() or "fail" in status.lower():
-                status_display = u"[red]{}[/red]".format(status)
-            elif "ok" in status.lower() or "thành công" in status.lower() or "ready" in status.lower():
-                status_display = u"[green]{}[/green]".format(status)
-            else:
-                status_display = u"[yellow]{}[/yellow]".format(status)
-            
-            table.add_row(
-                str(i),
-                data.get("device_serial", "?")[-18:],
-                data.get("username", "?")[:10],
-                version_display,
-                u"{}{}".format(time_display, status_display),
-                job_type.upper()[:15] if job_type else "None",
-                str(data.get("xu", 0)),
-                str(data.get("total_xu", 0)),
-                str(data.get("done", 0)),
-                str(data.get("fail", 0))
-            )
-    
-    return table
-
-
-def make_dashboard_layout():
-    order = ["xu", "dev", "act", "rate", "avg", "done", "fail", "err"]
-    chieu_cao_stats = 4
-    align_stats = "left"
-
-    layout = Layout()
+    console.print("\n[#ff9ecb]➤ [#ffffff]Nhập số thứ tự nick Golike muốn liên kết: [/]", end="")
+    choice = input().strip()
     
     try:
-        console_height = console.height
-        with dashboard_lock:
-            row_count = len(accounts_data) + 2
-        table_rows = min(row_count, console_height - 10)
-        le_duoi = max(0, console_height - 7 - table_rows - chieu_cao_stats)
+        idx = int(choice) - 1
+        if 0 <= idx < len(golike_accounts) and golike_accounts[idx].get("success"):
+            return golike_accounts[idx]
+        else:
+            console.print("[red]✗ Lựa chọn không hợp lệ![/]")
+            return None
     except:
-        le_duoi = 1
-    
-    layout.split(
-        Layout(name="title", size=3),
-        Layout(name="table"),
-        Layout(name="stats", size=chieu_cao_stats),
-        Layout(name="gap_bottom", size=le_duoi)
+        console.print("[red]✗ Vui lòng nhập số![/]")
+        return None
+
+
+# ========== MENU CẤU HÌNH DELAY VỚI RICH ==========
+def input_number(text, default):
+    while True:
+        try:
+            value = input(text).strip()
+            if value == "":
+                return default
+            return int(value)
+        except:
+            console.print("[bold #ff6b6b]Sai định dạng! Nhập số.[/]")
+
+def setup_delay_config():
+    """Cấu hình delay với giao diện Rich"""
+    delay_like = [5, 10]
+    delay_follow = [5, 15]
+    delay_comment = [10, 20]
+    delay_job = [3, 7]
+    delay_job_error = 10
+    delay_done = 5
+
+    while True:
+        table = Table(
+            title="[#ffffff]Delay [#00ffff]Config[/]",
+            box=box.SQUARE,
+            border_style="#ff9ecb",
+            show_lines=True,
+            pad_edge=False
+        )
+
+        table.add_column("Name", justify="left", header_style="#ff9ecb")
+        table.add_column("Min", justify="center", header_style="#ffffff")
+        table.add_column("Max", justify="center", header_style="#00ffff")
+
+        def row(name, val, c1, c2, c3):
+            return [
+                f"[bold {c1}]{name}[/]",
+                f"[bold {c2}]{val[0]}[/][#aaaaaa]s[/]",
+                f"[bold {c3}]{val[1]}[/][#aaaaaa]s[/]"
+            ]
+
+        table.add_row(*row("Delay Like", delay_like, "#ff6b6b", "#ffb8b8", "#ff8a8a"))
+        table.add_row(*row("Delay Follow", delay_follow, "#6bff6b", "#b8ffb8", "#8aff8a"))
+        table.add_row(*row("Delay Comment", delay_comment, "#6bb8ff", "#b8dcff", "#8ac6ff"))
+        table.add_row(*row("Delay Get Jobs", delay_job, "#ffa56b", "#ffd4b8", "#ffbc8a"))
+
+        table.add_row(
+            "[bold #ff6b6b]Delay Job Lỗi[/]", 
+            f"[bold #ffffff]{delay_job_error}[/]", 
+            "[#00ffff]s[/]"
+        )
+
+        table.add_row(
+            "[#ffd54f]Delay Hoàn Thành[/]",
+            f"[bold #ffffff]{delay_done}[/]",
+            "[#00ffff]s[/]"
+        ) 
+
+        console.clear()
+        console.print(table)
+
+        console.print("\n[#ff9ecb]➤ [#ffffff]Dùng lại config?[/] [#00ffff](Y/N)[/] [#ffffff]: ", end="")
+        choice = input().strip().lower()
+
+        if choice != "n":
+            console.print("[#6bffb8] Giữ config hiện tại[/]")
+            return {
+                "like": delay_like,
+                "follow": delay_follow,
+                "comment": delay_comment,
+                "job": delay_job,
+                "error": delay_job_error,
+                "done": delay_done
+            }
+
+        console.print("\n[bold #ffd54f] Nhập lại cấu hình (Nhấn Enter để giữ giá trị cũ)[/]\n")
+
+        delay_like = [
+            input_number(f"Delay Like Min ({delay_like[0]}): ", delay_like[0]),
+            input_number(f"Delay Like Max ({delay_like[1]}): ", delay_like[1])
+        ]
+
+        delay_follow = [
+            input_number(f"Delay Follow Min ({delay_follow[0]}): ", delay_follow[0]),
+            input_number(f"Delay Follow Max ({delay_follow[1]}): ", delay_follow[1])
+        ]
+
+        delay_comment = [
+            input_number(f"Delay Comment Min ({delay_comment[0]}): ", delay_comment[0]),
+            input_number(f"Delay Comment Max ({delay_comment[1]}): ", delay_comment[1])
+        ]
+
+        delay_job = [
+            input_number(f"Delay Get Jobs Min ({delay_job[0]}): ", delay_job[0]),
+            input_number(f"Delay Get Jobs Max ({delay_job[1]}): ", delay_job[1])
+        ]
+
+        delay_job_error = input_number(f"Delay Job Lỗi ({delay_job_error}): ", delay_job_error)
+        delay_done = input_number(f"Delay Hoàn Thành ({delay_done}): ", delay_done)
+
+
+# ========== MENU CHỌN JOB VỚI UI TABLET ==========
+JOBS = [
+    {"id": "1", "name": "Follow", "value": "follow", "color": "#ffd54f"},
+    {"id": "2", "name": "Like", "value": "like", "color": "#ff9ecb"},
+    {"id": "3", "name": "Comment", "value": "comment", "color": "#00ffff"},
+]
+
+def render_tablet(selections, current_idx):
+    """Vẽ khung Tablet (Bảng bo tròn góc)"""
+    table = Table(
+        box=box.ROUNDED, 
+        border_style="#d7b8ff", 
+        header_style="bold #ffffff",
+        width=45
     )
     
-    layout["title"].update(
-    Align.center("[bold #ffffff]TOOL GOLIKE TIKTOK [#00ff9c]BY PHONG TUS[/]")
-)
+    table.add_column("ID", justify="center", style="bold")
+    table.add_column("Nhiệm Vụ")
+    table.add_column("Trạng Thái", justify="center")
+
+    for i, job in enumerate(JOBS):
+        color = job["color"]
+        
+        if selections[i] == 'y':
+            status = "[bold #6bffb8] ✓ BẬT[/]"
+        elif selections[i] == 'n':
+            status = "[bold #ff6b6b] ✗ TẮT[/]"
+        elif i == current_idx:
+            status = "[blink bold #ffff00] ? Đang chọn...[/]"
+        else:
+            status = "[dim]...[/]"
+
+        table.add_row(
+            f"[{color}]{job['id']}[/]",
+            f"[{color}]{job['name']}[/]",
+            status
+        )
+        
+    return table
+
+def menu_jobs():
+    """Menu chọn nhiệm vụ với giao diện Tablet"""
+    while True:
+        selections = [None] * len(JOBS)
+        
+        for i, job in enumerate(JOBS):
+            while True:
+                console.clear()
+                console.print(render_tablet(selections, i))
+                
+                ans = console.input(f"\n[#ff9ecb]➤ [#ffffff]Bật nhiệm vụ {job['name']}? (y/n) (Mặc định: y)[/]: ").strip().lower()
+                
+                if ans in ['y', 'yes', '']:
+                    selections[i] = 'y'
+                    break
+                elif ans in ['n', 'no']:
+                    selections[i] = 'n'
+                    break
+
+        console.clear()
+        console.print(render_tablet(selections, -1))
+        
+        lam = [JOBS[i]["value"] for i in range(len(JOBS)) if selections[i] == 'y']
+        
+        if lam:
+            selected_names = [JOBS[i]["name"] for i in range(len(JOBS)) if selections[i] == 'y']
+            console.print(f"[#ffffff]Đã cấu hình chạy:[/] [bold #00ffff]{', '.join(selected_names)}[/]")
+            return lam
+        else:
+            console.print("[bold #ff6b6b]➤ Lỗi: Bạn phải chọn ít nhất 1 nhiệm vụ để chạy![/]")
+            console.input("[#00ffff]Nhấn Enter để chọn lại...[/]")
+
+
+# ========== CHỌN ACCOUNT VỚI GIAO DIỆN RICH ==========
+def chon_accounts_de_chay(selected_golike_accounts):
+    """Giao diện Rich quản lý và tự động map/add cookie với account Golike"""
+    ui_accounts = load_accounts_from_file()
+    selected = []
+
+    def render():
+        table = Table(expand=True, box=box.HEAVY, show_lines=True, border_style="#caffbf")
+        table.add_column("[#6bffb8]STT[/]", justify="center", width=4)
+        table.add_column("[#ffffb8]USERNAME[/]", justify="center", style="#6bb8ff", width=20)
+        table.add_column("[#ffd54f]GOLIKE ID[/]", justify="center", width=10)
+        table.add_column("[#ffa56b]NICK GOLIKE[/]", justify="center", width=15)
+        table.add_column("[#ffa56b]COOKIE[/]", justify="center", width=25)
+        table.add_column("[#6bffb8]STATUS[/]", justify="center", width=20)
     
-    with dashboard_lock:
-        total_xu = sum(d.get("total_xu", 0) for d in accounts_data.values())
-        total_done = sum(d.get("done", 0) for d in accounts_data.values())
-        total_fail = sum(d.get("fail", 0) for d in accounts_data.values())
-        total_devices = len(accounts_data)
-        now = time.time()
-        active_devices = sum(1 for d in accounts_data.values() if now - d.get("last_update", 0) < 60)
-        error_devices = sum(1 for d in accounts_data.values() if "error" in d.get("status", "").lower() or "lỗi" in d.get("status", "").lower())
-        success_rate = round((total_done / (total_done + total_fail) * 100), 1) if (total_done + total_fail) > 0 else 0
-        avg_xu = round(total_xu / total_devices, 1) if total_devices > 0 else 0
+        for i, acc in enumerate(ui_accounts, 1):
+            style = "bold #ff6b6b #ffd54f #ffffb8 #6bffb8 #6bb8ff" if (i-1) in selected else ""
+            cookie_short = (acc.get("cookie", "")[:25] + "...") if len(acc.get("cookie", "")) > 25 else acc.get("cookie", "")
+            golike_name = acc.get("golike_username", "-")
+        
+            table.add_row(
+                str(i),
+                f"[#6bb8ff]{acc.get('username','Unknown')}[/]",
+                f"[#ffd54f]{str(acc.get('account_id','-'))}[/]",
+                f"[#ffa56b]{golike_name}[/]",
+                f"[#ffa56b]{cookie_short if cookie_short else 'Chưa nhập'}[/]",
+                f"[#6bffb8]{acc.get('status','')}[/]",
+                style=style
+            )
 
-    panels = {
-        "xu": Panel(f"[bold #ffd54f]TỔNG XU\n{total_xu}[/]", border_style="#ffd54f", box=box.ROUNDED),
-        "dev": Panel(f"[bold #00ffff]THIẾT BỊ\n{total_devices}[/]", border_style="#00ffff", box=box.ROUNDED),
-        "act": Panel(f"[bold #00ff9c]ACTIVE\n{active_devices}[/]", border_style="#00ff9c", box=box.ROUNDED),
-        "err": Panel(f"[bold #ff4d6d]LỖI\n{error_devices}[/]", border_style="#ff4d6d", box=box.ROUNDED),
-        "done": Panel(f"[bold #00ff9c]DONE\n{total_done}[/]", border_style="#00ff9c", box=box.ROUNDED),
-        "fail": Panel(f"[bold #ff4d6d]FAIL\n{total_fail}[/]", border_style="#ff4d6d", box=box.ROUNDED),
-    }
+        total_accounts = len(ui_accounts)
+        valid_accounts = sum(1 for acc in ui_accounts if acc.get("is_valid", False))
+        title = Align.center(Text.from_markup("[#6bb8ff]INSTAGRAM[/] [#ff6b6b]ACCOUNT[/]"))
+        commands = Text.from_markup("\n [#6bb8ff]Lệnh: add = thêm cookie [/][#ff6b6b]|[/][#ffd54f] save = lưu [/][#6bffb8]|[/][#6bb8ff] load = tải [/][#ffd54f]|[/][#ff9ecb] 1,2,3 = chọn acc [/][#6bb8ff]|[/][#ff6b6b] -1,2 = xóa acc [/][#6bffb8]|[/][#ffd54f] run = Bắt đầu\n[/]")
 
-    stats_grid = Table.grid(expand=True)
-    stats_grid.add_row(*[panels[k] for k in order if k in panels])
+        return Group(title, table, commands)
 
-    layout["stats"].update(Align(stats_grid, align=align_stats))
-    layout["table"].update(build_dashboard_table())
-    layout["gap_bottom"].update("")
+    def parse_ids(cmd):
+        return [int(x.strip()) - 1 for x in cmd.split(",") if x.strip().isdigit()]
 
-    return layout
+    def add_multi_cookie():
+        """THÊM COOKIE - LUỒNG MỚI: THÊM XONG QUAY LẠI NGAY ĐỂ THÊM COOKIE MỚI"""
+        console.print("\n[#6bffb8] Dán cookie từng dòng (gõ 'done' để dừng):[/]")
+        console.print("[#6bb8ff] Mỗi cookie sẽ được kiểm tra và hiển thị tên username ngay sau khi nhập[/]\n")
+        
+        while True:
+            cookie_input = input(" Nhập Cookie: ").strip()
+            if cookie_input.lower() == "done":
+                break
+            if not cookie_input:
+                continue
+
+            with console.status("[bold #ffa56b] Đang kiểm tra cookie...[/bold #ffa56b]", spinner="dots"):
+                time.sleep(0.5)
+                username = get_username_from_cookie(cookie_input)
+
+            if not username:
+                console.print(f"[#ff6b6b] THẤT BẠI![/#ff6b6b] Cookie không hợp lệ hoặc đã chết!")
+                console.print(f"[dim]   → Không thể lấy được username từ cookie này[/dim]")
+                console.print(f"[dim]   → Đã bỏ qua, không lưu vào danh sách[/dim]\n")
+                continue
+                
+            console.print(f"[#6bffb8] THÀNH CÔNG![/#6bffb8] Đã lấy được username: [bold #6bb8ff]{username}[/bold #6bb8ff]")
+            
+            if any(a.get("username") == username for a in ui_accounts):
+                console.print(f"[#ff6b6b]  Cookie cho {username} đã tồn tại trong danh sách![/#ff6b6b]")
+                console.print(f"[dim]   → Không thêm trùng lặp[/dim]\n")
+                continue
+            
+            console.print(f"\n[#ffa56b] Chọn nick Golike để liên kết với account [cyan]{username}[/cyan][/#ffa56b]")
+            
+            valid_golike = [acc for acc in selected_golike_accounts if acc.get("success")]
+            if not valid_golike:
+                console.print("[#ff6b6b] Không có nick Golike hợp lệ nào để chọn![/#ff6b6b]")
+                console.print("[dim]   → Vui lòng thêm Authorization Golike trước[/dim]\n")
+                continue
+            
+            selected_golike = display_golike_list_for_selection(valid_golike)
+            if not selected_golike:
+                console.print("[#ff6b6b] Lựa chọn không hợp lệ! Bỏ qua cookie này.[/#ff6b6b]\n")
+                continue
+            
+            headers_golike = {
+                'Accept-Language': 'vi,en-US;q=0.9,en;q=0.8',
+                'Referer': 'https://app.golike.net/',
+                'Sec-Ch-Ua': '"Not A(Brand";v="99", "Google Chrome";v="121", "Chromium";v="121"',
+                'Sec-Ch-Ua-Mobile': '?0',
+                'Sec-Ch-Ua-Platform': "Windows",
+                'Sec-Fetch-Dest': 'empty',
+                'Sec-Fetch-Mode': 'cors',
+                'Sec-Fetch-Site': 'same-site',
+                'T': 'VFZSak1FMTZZM3BOZWtFd1RtYzlQUT09',
+                'User-Agent': 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36',
+                "Authorization": selected_golike['auth'],
+                'Content-Type': 'application/json;charset=utf-8'
+            }
+            
+            console.print("[#6bb8ff] Đang kiểm tra account trên Golike...[/#6bb8ff]")
+            chontk_result = chonacc(headers_golike)
+            
+            account_map = {}
+            if chontk_result.get('status') == True:
+                accounts_list = chontk_result.get('data', [])
+                account_map = {acc['instagram_username'].lower(): acc for acc in accounts_list}
+            
+            is_valid = False
+            account_id = "-"
+            status = ""
+            golike_username = selected_golike['username']
+            
+            if username.lower() not in account_map:
+                console.print(f"[#ffa56b]  Account {username} chưa có trên Golike![/#ffa56b]")
+                with console.status(f"[bold #ffa56b] Đang tự động thêm {username} vào Golike...[/bold #ffa56b]", spinner="dots"):
+                    success, acc_id = auto_add_golike(username, cookie_input, headers_golike, golike_username)
+                
+                if success:
+                    console.print(f"[#6bffb8] Đã thêm thành công {username} vào Golike! (ID: {acc_id})[/#6bffb8]")
+                    status = "[#6bffb8] Hợp lệ (Sẵn sàng)[/#6bffb8]"
+                    account_id = acc_id
+                    is_valid = True
+                else:
+                    console.print(f"[#ff6b6b] Thêm {username} vào Golike thất bại![/#ff6b6b]")
+                    console.print(f"[dim]   → Cookie không được thêm vào danh sách[/dim]\n")
+                    continue
+            else:
+                console.print(f"[#6bffb8] Account {username} đã tồn tại trên Golike![/#6bffb8]")
+                status = "[#6bffb8] Hợp lệ (Sẵn sàng)[/#6bffb8]"
+                account_id = account_map[username.lower()]['id']
+                is_valid = True
+            
+            if is_valid:
+                ui_accounts.append({
+                    "username": username,
+                    "account_id": account_id,
+                    "cookie": cookie_input,
+                    "golike_username": golike_username,
+                    "status": status,
+                    "is_valid": True,
+                    "saved_at": get_current_time().strftime("%Y-%m-%d %H:%M:%S")
+                })
+                
+                console.print(f"[bold #6bffb8] Đã thêm {username} vào danh sách thành công! (Liên kết với Golike: {golike_username})[/bold #6bffb8]")
+                
+                save_accounts_to_file(ui_accounts)
+                console.print(f"[dim]   → Đã tự động lưu vào file[/dim]")
+            else:
+                console.print(f"[bold #ff6b6b] Thêm thất bại, không lưu vào danh sách[/bold #ff6b6b]")
+            
+            console.print(f"[#6bb8ff]{'─' * 60}[/#6bb8ff]\n")
+
+    while True:
+        os.system('clear' if os.name == 'posix' else 'cls')
+        console.print(render())
+        cmd = input("\033[38;2;107;255;184mNhập lệnh (): \033[0m").strip().lower()
+
+        if cmd == "run":
+            if not selected:
+                console.print("[#ff6b6b] Bạn chưa chọn account nào để chạy! Hãy nhập số thứ tự (VD: 1,2)[/#ff6b6b]")
+                time.sleep(2)
+                continue
+            
+            invalid_selected = [ui_accounts[i]["username"] for i in selected if not ui_accounts[i].get("is_valid", False)]
+            if invalid_selected:
+                console.print(f"[#ff6b6b] Các account sau không hợp lệ (lỗi cookie/không có trên Golike): {', '.join(invalid_selected)}[/#ff6b6b]")
+                console.print("[#ffa56b] Vui lòng bỏ chọn hoặc nhập lại cookie![/#ffa56b]")
+                time.sleep(3)
+                continue
+            break
+
+        if cmd == "add":
+            add_multi_cookie()
+            continue
+
+        if cmd == "save":
+            if save_accounts_to_file(ui_accounts):
+                console.print("[#6bffb8] Đã lưu danh sách accounts thành công![/#6bffb8]")
+            else:
+                console.print("[#ff6b6b] Lưu thất bại![/#ff6b6b]")
+            time.sleep(1.5)
+            continue
+
+        if cmd == "load":
+            loaded_accounts = load_accounts_from_file()
+            if loaded_accounts:
+                ui_accounts = loaded_accounts
+                selected = []
+                console.print("[#6bffb8] Đã tải danh sách accounts từ file![/#6bffb8]")
+            else:
+                console.print("[#ffa56b] Không có file lưu trữ hoặc file rỗng![/#ffa56b]")
+            time.sleep(1.5)
+            continue
+
+        if cmd.startswith("-"):
+            ids = parse_ids(cmd[1:])
+            ids = sorted(set(ids), reverse=True)
+            for idx in ids:
+                if 0 <= idx < len(ui_accounts):
+                    removed_username = ui_accounts[idx].get("username", "Unknown")
+                    ui_accounts.pop(idx)
+                    console.print(f"[#ffa56b]️ Đã xóa account: {removed_username}[/#ffa56b]")
+            selected = []
+            save_accounts_to_file(ui_accounts)
+            time.sleep(1)
+            continue
+
+        try:
+            ids = parse_ids(cmd)
+            if ids:
+                selected = [i for i in ids if 0 <= i < len(ui_accounts)]
+                if selected:
+                    selected_names = [ui_accounts[i].get("username", "Unknown") for i in selected]
+                    console.print(f"[#6bffb8] Đã chọn {len(selected)} account: {', '.join(selected_names)}[/#6bffb8]")
+                    time.sleep(1)
+        except:
+            pass
+
+    selected_accounts = {}
+    for idx in selected:
+        acc_data = ui_accounts[idx]
+        acc_id = acc_data['account_id']
+        
+        golike_auth = None
+        golike_username = acc_data.get('golike_username')
+        for golike_acc in selected_golike_accounts:
+            if golike_acc.get('username') == golike_username:
+                golike_auth = golike_acc.get('auth')
+                break
+        
+        selected_accounts[acc_id] = {
+            "id": acc_id,
+            "username": acc_data['username'],
+            "cookie": acc_data['cookie'],
+            "golike_username": golike_username,
+            "golike_auth": golike_auth,
+            "selected": True,
+            "done": 0,
+            "skip": 0,
+            "follow": 0,
+            "like": 0,
+            "comment": 0,
+            "favorite": 0,
+            "coin": 0,
+            "status": "Đang chờ...",
+            "detail_status": "Đang khởi tạo...",
+            "api_message": "",
+            "session_errors": 0,
+            "last_error_time": 0,
+            "error_counts": {
+                'follow': 0, 'like': 0, 'comment': 0, 'checkpoint': 0, 'rate_limit': 0, 'other': 0
+            },
+            "is_running": True,
+            "thread_id": None,
+            "job_counter": 0,
+            "rate_limit_until": 0  # Thêm biến lưu thời gian rate limit kết thúc
+        }
+        
+        try:
+            with open(f"cookies_{acc_data['username']}.txt", 'w') as f:
+                f.write(acc_data['cookie'])
+        except:
+            pass
+
+    return selected_accounts
 
 
-def run_dashboard():
-    if hasattr(os, 'nice'):
-        try: os.nice(10)
-        except: pass
-    
-    with Live(
-        make_dashboard_layout(),
-        refresh_per_second=1.0, 
-        screen=False,
-        auto_refresh=True
-    ) as live:
-        while not is_stop_all():
+# ========== INSTAGRAM Class - Sử dụng Selenium ==========
+class INSTAGRAM:
+    def __init__(self, cookies, account_data=None):
+        self.cookies = cookies
+        self.driver = None
+        self.user_id = None
+        self.username = None
+        self.last_action_time = 0
+        self.min_action_interval = 5
+        self.account_data = account_data
+        self.error_count = 0
+        self.max_errors_before_reset = 3
+        self.driver_lock = threading.Lock()  # Lock cho driver
+        
+    def _update_status(self, message, level="info"):
+        if self.account_data:
+            update_account_status(self.account_data, message, level)
+            if "thành công" in message.lower() or "success" in message.lower():
+                self.error_count = 0
+        
+    def reset_driver(self):
+        self._update_status("Reset driver do lỗi liên tiếp...")
+        try:
+            if self.driver:
+                self.driver.quit()
+        except:
+            pass
+        self.driver = None
+        self.error_count = 0
+        time.sleep(5)
+        return self.init_driver()
+        
+    def _wait_for_rate_limit(self):
+        current_time = time.time()
+        time_since_last = current_time - self.last_action_time
+        if time_since_last < self.min_action_interval:
+            time.sleep(self.min_action_interval - time_since_last)
+        self.last_action_time = time.time()
+        
+    def init_driver(self):
+        if not self.driver:
             try:
-                live.update(make_dashboard_layout())
-                time.sleep(1)
-            except Exception:
-                time.sleep(1)
+                self._update_status("Khởi tạo driver...")
+                with self.driver_lock:
+                    self.driver = create_chrome_driver(self.account_data)
+                self.driver.set_page_load_timeout(60)
+                self.driver.set_script_timeout(30)
+                self._update_status("Driver sẵn sàng")
+                return True
+            except Exception as e:
+                self._update_status(f"Lỗi driver: {str(e)[:30]}", "error")
+                return False
+        return True
+    
+    def login_with_cookies(self):
+        try:
+            if not self.init_driver():
+                return False
+            
+            self._update_status("Đang truy cập Instagram...")
+            
+            try:
+                self.driver.set_page_load_timeout(60)
+                self.driver.get("https://www.instagram.com/")
+            except TimeoutException:
+                self._update_status("Timeout tải trang, tiếp tục...")
+                self.driver.execute_script("window.stop();")
+            
+            time.sleep(random.uniform(4, 7))
+            
+            self._update_status("Đang thêm cookie...")
+            
+            cookie_dict = {}
+            for item in self.cookies.split('; '):
+                if '=' in item:
+                    key, value = item.split('=', 1)
+                    cookie_dict[key] = value
+            
+            cookie_count = 0
+            for name, value in cookie_dict.items():
+                try:
+                    if name.lower() in ['expires', 'max-age', 'domain', 'path', 'secure', 'httponly', 'samesite']:
+                        continue
+                    
+                    cookie = {
+                        'name': name,
+                        'value': value,
+                        'domain': '.instagram.com',
+                        'path': '/',
+                        'secure': True,
+                        'httpOnly': False
+                    }
+                    
+                    try:
+                        self.driver.add_cookie(cookie)
+                        cookie_count += 1
+                    except:
+                        cookie['domain'] = 'www.instagram.com'
+                        try:
+                            self.driver.add_cookie(cookie)
+                            cookie_count += 1
+                        except:
+                            pass
+                except:
+                    pass
+            
+            self._update_status(f"Đã thêm {cookie_count} cookie")
+            
+            self._update_status("Đang refresh trang...")
+            self.driver.refresh()
+            
+            self._update_status("Đợi Instagram xử lý...")
+            time.sleep(random.uniform(7, 10))
+            
+            current_url = self.driver.current_url
+            page_source = self.driver.page_source.lower()
+            
+            login_success = False
+            if "instagram.com/accounts/login" not in current_url and "login" not in current_url:
+                login_success = True
+            
+            if not login_success:
+                try:
+                    profile_elements = self.driver.find_elements(By.CSS_SELECTOR, "svg[aria-label='Trang cá nhân'], img[alt*='profile'], a[href*='accounts/edit']")
+                    if profile_elements:
+                        login_success = True
+                except:
+                    pass
+            
+            if login_success:
+                self._update_status("Đăng nhập thành công!")
+                
+                try:
+                    for cookie in self.driver.get_cookies():
+                        if cookie['name'] == 'ds_user_id':
+                            self.user_id = cookie['value']
+                        if cookie['name'] == 'sessionid' and 'userid' in cookie.get('value', ''):
+                            parts = cookie['value'].split('%')
+                            if len(parts) > 0 and parts[0].isdigit():
+                                self.user_id = parts[0]
+                    
+                    self.driver.get("https://www.instagram.com/accounts/edit/")
+                    time.sleep(random.uniform(2, 4))
+                    
+                    username_inputs = self.driver.find_elements(By.CSS_SELECTOR, "input[name='username']")
+                    if username_inputs:
+                        self.username = username_inputs[0].get_attribute('value')
+                        self._update_status(f"Username: {self.username}")
+                except:
+                    pass
+                
+                if not self.username:
+                    self.username = "account_" + str(self.user_id)[-6:] if self.user_id else "unknown"
+                    self._update_status(f"Username: {self.username}")
+                
+                return True
+            else:
+                self._update_status("Đăng nhập thất bại - Cookie hết hạn", "error")
+                return False
+                
+        except Exception as e:
+            self._update_status(f"Lỗi đăng nhập: {str(e)[:30]}", "error")
+            return False
+    
+    def FOLLOW(self, username_to_follow):
+        if self.error_count >= self.max_errors_before_reset:
+            if not self.reset_driver():
+                return {"status": False, "message": "Không thể reset driver"}
+        
+        self._wait_for_rate_limit()
+        
+        try:
+            self._update_status(f"Đang follow: {username_to_follow}")
+            
+            clean_username = str(username_to_follow).strip().replace('@', '')
+            profile_url = f"https://www.instagram.com/{clean_username}/"
+            
+            try:
+                self.driver.set_page_load_timeout(60)
+                self.driver.get(profile_url)
+            except TimeoutException:
+                self._update_status("Timeout tải trang, dừng tải...")
+                self.driver.execute_script("window.stop();")
+                time.sleep(random.uniform(2, 4))
+            
+            time.sleep(random.uniform(4, 7))
+            
+            page_source = self.driver.page_source
+            if "Sorry, this page isn't available" in page_source or "Trang này không khả dụng" in page_source or "Page not found" in page_source:
+                error_msg = f"User không tồn tại: {clean_username}"
+                self._update_status(error_msg, "error")
+                self.error_count += 1
+                return {"status": False, "message": error_msg}
+            
+            if "This account is private" in page_source or "Tài khoản này ở chế độ riêng tư" in page_source:
+                self._update_status(f"User private: {clean_username}", "warning")
+            
+            follow_selectors = [
+                "//button[text()='Follow']",
+                "//button[text()='Theo dõi']",
+                "//button[contains(text(), 'Follow')]",
+                "//button[contains(text(), 'Theo dõi')]",
+                "//div[text()='Follow']",
+                "//div[text()='Theo dõi']",
+                "//div[contains(text(), 'Follow')]",
+                "//div[contains(text(), 'Theo dõi')]",
+                "button._acan._acap._acas",
+                "button._acan._acap._acat",
+                "button._acan._acap._aj1-",
+                "section header section button",
+                "main button[type='button']",
+                "button[aria-label='Follow']",
+                "button[aria-label='Theo dõi']",
+                "//div[@role='button' and contains(., 'Follow')]",
+                "//div[@role='button' and contains(., 'Theo dõi')]",
+                "button[style*='rgb(0, 149, 246)']",
+                "div._ab8w button",
+                "div._ab8y button",
+                "div._ab_m button"
+            ]
+            
+            follow_button = None
+            
+            for selector in follow_selectors:
+                try:
+                    if selector.startswith("//"):
+                        elements = self.driver.find_elements(By.XPATH, selector)
+                    else:
+                        elements = self.driver.find_elements(By.CSS_SELECTOR, selector)
+                    
+                    for elem in elements:
+                        if elem.is_displayed() and elem.is_enabled():
+                            text = elem.text.lower()
+                            if 'follow' in text or 'theo dõi' in text:
+                                follow_button = elem
+                                break
+                    if follow_button:
+                        break
+                except:
+                    continue
+            
+            following_selectors = [
+                "//button[contains(., 'Following')]",
+                "//button[contains(., 'Đang follow')]",
+                "//div[contains(., 'Following') and @role='button']",
+                "//div[contains(., 'Đang follow') and @role='button']",
+                "button._acan._acap._acat",
+                "button[aria-label='Following']",
+                "button[aria-label='Đang follow']"
+            ]
+            
+            for selector in following_selectors:
+                try:
+                    elements = self.driver.find_elements(By.XPATH, selector)
+                    for elem in elements:
+                        if elem.is_displayed():
+                            self._update_status(f"Đã follow {clean_username} trước đó")
+                            return {"status": False, "message": "Đã follow trước đó"}
+                except:
+                    continue
+            
+            if follow_button:
+                self._update_status(f"Tìm thấy nút Follow")
+                
+                self.driver.execute_script("arguments[0].scrollIntoView({behavior: 'smooth', block: 'center'});", follow_button)
+                time.sleep(random.uniform(1.5, 3))
+                
+                click_success = False
+                
+                try:
+                    follow_button.click()
+                    click_success = True
+                    self._update_status("Đã click nút Follow")
+                except:
+                    try:
+                        self.driver.execute_script("arguments[0].click();", follow_button)
+                        click_success = True
+                        self._update_status("Đã click nút Follow (JavaScript)")
+                    except:
+                        try:
+                            from selenium.webdriver.common.action_chains import ActionChains
+                            actions = ActionChains(self.driver)
+                            actions.move_to_element(follow_button).click().perform()
+                            click_success = True
+                            self._update_status("Đã click nút Follow (ActionChains)")
+                        except:
+                            pass
+                
+                time.sleep(random.uniform(3, 5))
+                
+                for selector in following_selectors:
+                    try:
+                        elements = self.driver.find_elements(By.XPATH, selector)
+                        for elem in elements:
+                            if elem.is_displayed():
+                                self._update_status(f"Follow thành công: {clean_username}")
+                                self.error_count = 0
+                                return {"status": True, "message": "Follow thành công"}
+                    except:
+                        continue
+                
+                try:
+                    confirm_buttons = self.driver.find_elements(By.XPATH, "//button[contains(., 'Confirm')] | //button[contains(., 'Xác nhận')] | //div[contains(., 'Confirm') and @role='button']")
+                    if confirm_buttons:
+                        confirm_buttons[0].click()
+                        time.sleep(random.uniform(1.5, 3))
+                        self._update_status(f"Follow thành công (có xác nhận)")
+                        self.error_count = 0
+                        return {"status": True, "message": "Follow thành công"}
+                except:
+                    pass
+                
+                self._update_status(f"Đã click Follow nhưng không xác nhận được", "warning")
+                return {"status": True, "message": "Đã click Follow"}
+            else:
+                for selector in following_selectors:
+                    try:
+                        elements = self.driver.find_elements(By.XPATH, selector)
+                        if elements:
+                            self._update_status(f"Đã follow {clean_username} trước đó")
+                            return {"status": False, "message": "Đã follow trước đó"}
+                    except:
+                        continue
+                
+                error_msg = f"Không tìm thấy nút Follow cho {clean_username}"
+                self._update_status(error_msg, "error")
+                self.error_count += 1
+                return {"status": False, "message": error_msg}
+                    
+        except Exception as e:
+            self.error_count += 1
+            error_msg = str(e)
+            self._update_status(f"Lỗi follow ({self.error_count}/{self.max_errors_before_reset}): {error_msg[:30]}", "error")
+            return {"status": False, "message": f"Lỗi: {error_msg}"}
+    
+    def LIKE(self, post_url):
+        if self.error_count >= self.max_errors_before_reset:
+            if not self.reset_driver():
+                return {"status": False, "message": "Không thể reset driver"}
+        
+        self._wait_for_rate_limit()
+        
+        try:
+            self._update_status(f"Đang like bài post...")
+            
+            try:
+                self.driver.set_page_load_timeout(60)
+                self.driver.get(post_url)
+            except TimeoutException:
+                self._update_status("Timeout tải trang, dừng tải...")
+                self.driver.execute_script("window.stop();")
+                time.sleep(random.uniform(2, 4))
+            
+            time.sleep(random.uniform(4, 7))
+            
+            page_source = self.driver.page_source
+            if "Sorry, this page isn't available" in page_source or "Trang này không khả dụng" in page_source:
+                error_msg = "Bài post không tồn tại"
+                self._update_status(error_msg, "error")
+                self.error_count += 1
+                return {"status": False, "message": error_msg}
+            
+            like_selectors = [
+                "svg[aria-label='Thích']",
+                "svg[aria-label='Like']",
+                "svg[aria-label='Thích']",
+                "button._abl- svg",
+                "button._a9-- svg",
+                "div[role='button'] svg",
+                "button._abl-",
+                "button._a9--",
+                "svg[style*='fill: rgb(255, 48, 65)']",
+                "article section button",
+                "main article button svg"
+            ]
+            
+            like_button = None
+            
+            for selector in like_selectors:
+                try:
+                    if selector.startswith("//"):
+                        elements = self.driver.find_elements(By.XPATH, selector)
+                    else:
+                        elements = self.driver.find_elements(By.CSS_SELECTOR, selector)
+                    
+                    if elements:
+                        if "svg" in selector:
+                            like_button = elements[0].find_element(By.XPATH, "..")
+                        else:
+                            like_button = elements[0]
+                        break
+                except:
+                    continue
+            
+            unlike_selectors = [
+                "svg[aria-label='Bỏ thích']",
+                "svg[aria-label='Unlike']",
+                "svg[aria-label='Bỏ thích']",
+                "svg[style*='fill: rgb(237, 73, 86)']",
+                "button._abl- svg[style*='fill: rgb(237, 73, 86)']"
+            ]
+            
+            for selector in unlike_selectors:
+                try:
+                    if self.driver.find_elements(By.CSS_SELECTOR, selector):
+                        self._update_status("Đã like bài post trước đó")
+                        return {"status": False, "message": "Đã like trước đó"}
+                except:
+                    continue
+            
+            if like_button and like_button.is_displayed():
+                self._update_status(f"Tìm thấy nút Like")
+                
+                self.driver.execute_script("arguments[0].scrollIntoView({behavior: 'smooth', block: 'center'});", like_button)
+                time.sleep(random.uniform(1.5, 3))
+                
+                try:
+                    self.driver.execute_script("arguments[0].click();", like_button)
+                    self._update_status("Đã click nút Like")
+                except:
+                    try:
+                        like_button.click()
+                        self._update_status("Đã click nút Like (click thường)")
+                    except:
+                        error_msg = "Không thể click nút Like"
+                        self._update_status(error_msg, "error")
+                        self.error_count += 1
+                        return {"status": False, "message": error_msg}
+                
+                time.sleep(random.uniform(2, 4))
+                
+                for selector in unlike_selectors:
+                    try:
+                        if self.driver.find_elements(By.CSS_SELECTOR, selector):
+                            self._update_status("Like thành công!")
+                            self.error_count = 0
+                            return {"status": True, "message": "Like thành công"}
+                    except:
+                        continue
+                
+                self._update_status("Đã click Like nhưng không xác nhận được", "warning")
+                return {"status": True, "message": "Đã click Like"}
+            else:
+                error_msg = "Không tìm thấy nút Like"
+                self._update_status(error_msg, "error")
+                self.error_count += 1
+                return {"status": False, "message": error_msg}
+                    
+        except Exception as e:
+            self.error_count += 1
+            error_msg = str(e)
+            self._update_status(f"Lỗi like ({self.error_count}/{self.max_errors_before_reset}): {error_msg[:30]}", "error")
+            return {"status": False, "message": f"Lỗi: {error_msg}"}
+    
+    def COMMENT(self, post_url, comment_text):
+        if self.error_count >= self.max_errors_before_reset:
+            if not self.reset_driver():
+                return {"status": False, "message": "Không thể reset driver"}
+        
+        self._wait_for_rate_limit()
+        
+        try:
+            self._update_status(f"Đang comment...")
+            
+            try:
+                self.driver.set_page_load_timeout(60)
+                self.driver.get(post_url)
+            except TimeoutException:
+                self._update_status("Timeout tải trang, dừng tải...")
+                self.driver.execute_script("window.stop();")
+                time.sleep(random.uniform(2, 4))
+            
+            time.sleep(random.uniform(4, 7))
+            
+            page_source = self.driver.page_source
+            if "Sorry, this page isn't available" in page_source or "Trang này không khả dụng" in page_source:
+                error_msg = "Bài post không tồn tại"
+                self._update_status(error_msg, "error")
+                self.error_count += 1
+                return {"status": False, "message": error_msg}
+            
+            comment_icon_selectors = [
+                "svg[aria-label='Bình luận']",
+                "svg[aria-label='Comment']",
+                "svg[aria-label='Bình luận']",
+                "//*[@aria-label='Bình luận']",
+                "//*[@aria-label='Comment']",
+                "button[aria-label='Bình luận']",
+                "button[aria-label='Comment']"
+            ]
+            
+            comment_icon = None
+            for selector in comment_icon_selectors:
+                try:
+                    if selector.startswith("//"):
+                        elements = self.driver.find_elements(By.XPATH, selector)
+                    else:
+                        elements = self.driver.find_elements(By.CSS_SELECTOR, selector)
+                    
+                    if elements:
+                        comment_icon = elements[0]
+                        self._update_status("Tìm thấy icon bình luận")
+                        break
+                except:
+                    continue
+            
+            if comment_icon:
+                try:
+                    self.driver.execute_script("arguments[0].scrollIntoView({behavior: 'smooth', block: 'center'});", comment_icon)
+                    time.sleep(random.uniform(1, 2))
+                    self.driver.execute_script("arguments[0].click();", comment_icon)
+                    self._update_status("Đã click icon bình luận")
+                    time.sleep(random.uniform(1.5, 3))
+                except:
+                    self._update_status("Không thể click icon bình luận, vẫn thử tìm textarea...")
+            
+            comment_selectors = [
+                "textarea[aria-label='Thêm bình luận...']",
+                "textarea[aria-label='Add a comment...']",
+                "textarea[placeholder='Thêm bình luận...']",
+                "textarea[placeholder='Add a comment...']",
+                "form textarea",
+                "textarea._aaoc",
+                "textarea._abl-",
+                "div[role='textbox']",
+                "article textarea",
+                "main article textarea"
+            ]
+            
+            comment_input = None
+            
+            for selector in comment_selectors:
+                try:
+                    if selector.startswith("//"):
+                        elements = self.driver.find_elements(By.XPATH, selector)
+                    else:
+                        elements = self.driver.find_elements(By.CSS_SELECTOR, selector)
+                    
+                    for elem in elements:
+                        if elem.is_displayed():
+                            comment_input = elem
+                            break
+                    if comment_input:
+                        break
+                except:
+                    continue
+            
+            if comment_input:
+                self._update_status(f"Tìm thấy ô comment")
+                
+                self.driver.execute_script("arguments[0].scrollIntoView({behavior: 'smooth', block: 'center'});", comment_input)
+                time.sleep(random.uniform(1.5, 3))
+                
+                try:
+                    comment_input.click()
+                except:
+                    self.driver.execute_script("arguments[0].click();", comment_input)
+                
+                time.sleep(random.uniform(1, 2))
+                
+                comment_input.clear()
+                time.sleep(random.uniform(0.3, 0.7))
+                
+                for char in comment_text:
+                    comment_input.send_keys(char)
+                    time.sleep(random.uniform(0.05, 0.1))
+                
+                self._update_status("Đã nhập nội dung comment")
+                time.sleep(random.uniform(1.5, 3))
+                
+                post_selectors = [
+                    "//div[contains(text(), 'Đăng')]",
+                    "//div[contains(text(), 'Post')]",
+                    "//button[contains(text(), 'Đăng')]",
+                    "//button[contains(text(), 'Post')]",
+                    "button._acan._acap._acat",
+                    "button._abl-",
+                    "div[role='button']:has-text('Đăng')",
+                    "div[role='button']:has-text('Post')",
+                    "form button",
+                    "article button[type='submit']"
+                ]
+                
+                post_button = None
+                
+                for selector in post_selectors:
+                    try:
+                        if selector.startswith("//"):
+                            elements = self.driver.find_elements(By.XPATH, selector)
+                        else:
+                            elements = self.driver.find_elements(By.CSS_SELECTOR, selector)
+                        
+                        for elem in elements:
+                            if elem.is_displayed() and elem.is_enabled():
+                                post_button = elem
+                                break
+                        if post_button:
+                            break
+                    except:
+                        continue
+                
+                if post_button:
+                    self._update_status("Đang đăng comment...")
+                    try:
+                        post_button.click()
+                    except:
+                        self.driver.execute_script("arguments[0].click();", post_button)
+                    
+                    time.sleep(random.uniform(2, 4))
+                    self._update_status("Comment thành công!")
+                    self.error_count = 0
+                    return {"status": True, "message": "Comment thành công"}
+                else:
+                    self._update_status("Không tìm thấy nút Post, thử nhấn Enter...")
+                    comment_input.send_keys(Keys.RETURN)
+                    time.sleep(random.uniform(2, 4))
+                    self._update_status("Đã gửi comment bằng Enter")
+                    self.error_count = 0
+                    return {"status": True, "message": "Comment thành công"}
+            else:
+                error_msg = "Không tìm thấy ô comment"
+                self._update_status(error_msg, "error")
+                self.error_count += 1
+                return {"status": False, "message": error_msg}
+                    
+        except Exception as e:
+            self.error_count += 1
+            error_msg = str(e)
+            self._update_status(f"Lỗi comment ({self.error_count}/{self.max_errors_before_reset}): {error_msg[:30]}", "error")
+            return {"status": False, "message": f"Lỗi: {error_msg}"}
+    
+    def close(self):
+        if self.driver:
+            try:
+                with self.driver_lock:
+                    self.driver.quit()
+            except:
+                pass
+            self.driver = None
 
 
-# ==================== MAIN ====================
-if __name__ == "__main__":
-    clear_stop_all()
+# ========== CẤU HÌNH SELENIUM THEO MÔI TRƯỜNG ==========
+def create_chrome_driver(account_data=None):
+    """Tạo Chrome driver với cấu hình phù hợp theo môi trường"""
     
-    def signal_handler(sig, frame):
-        print(u"\n[yellow] Nhận tín hiệu dừng, đang thoát an toàn...[/]")
-        set_stop_all()
-        sys.exit(0)
+    if account_data:
+        update_account_status(account_data, "Kiểm tra trình duyệt...")
     
-    signal.signal(signal.SIGINT, signal_handler)
-    signal.signal(signal.SIGTERM, signal_handler)
+    chrome_installed, chrome_path = check_chrome_installed(account_data)
+    if not chrome_installed:
+        raise Exception("Chrome/Chromium chưa được cài đặt.")
+    
+    chrome_options = Options()
+    
+    user_agent = get_random_user_agent()
+    chrome_options.add_argument(f'--user-agent={user_agent}')
+    
+    chrome_options.add_argument('--no-sandbox')
+    chrome_options.add_argument('--disable-dev-shm-usage')
+    chrome_options.add_argument('--disable-gpu')
+    chrome_options.add_argument('--disable-web-security')
+    chrome_options.add_argument('--disable-features=VizDisplayCompositor')
+    chrome_options.add_argument('--disable-blink-features=AutomationControlled')
+    chrome_options.add_argument('--disable-notifications')
+    chrome_options.add_argument('--disable-extensions')
+    chrome_options.add_argument('--lang=vi-VN')
+    chrome_options.add_argument('--remote-debugging-port=9222')
+    
+    chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
+    chrome_options.add_experimental_option('useAutomationExtension', False)
+    chrome_options.add_experimental_option("prefs", {
+        "credentials_enable_service": False,
+        "profile.password_manager_enabled": False,
+        "profile.default_content_setting_values.notifications": 2
+    })
+    
+    if RUNNING_IN_TERMUX:
+        chrome_options.add_argument('--headless')
+        chrome_options.add_argument('--window-size=1920,1080')
+        chrome_options.add_argument('--disable-software-rasterizer')
+        chrome_options.add_argument('--disable-setuid-sandbox')
+        chrome_options.add_argument('--single-process')
+        chrome_options.add_argument('--disable-logging')
+        chrome_options.add_argument('--log-level=3')
+        chrome_options.add_argument('--silent')
+        chrome_options.add_argument('--disable-session-crashed-bubble')
+        chrome_options.add_argument('--disable-infobars')
+        chrome_options.add_argument('--hide-scrollbars')
+        
+        if chrome_path:
+            chrome_options.binary_location = chrome_path
+    else:
+        chrome_options.add_argument('--start-maximized')
+    
+    driver = None
+    errors = []
+    
+    if RUNNING_IN_TERMUX:
+        chromedriver_path = find_chromedriver_in_termux()
+        if chromedriver_path:
+            try:
+                if account_data:
+                    update_account_status(account_data, "Khởi tạo driver...")
+                
+                service = Service(
+                    executable_path=chromedriver_path,
+                    service_args=['--verbose', '--log-path=chromedriver.log']
+                )
+                
+                driver = webdriver.Chrome(service=service, options=chrome_options)
+                driver.set_page_load_timeout(60)
+                driver.set_script_timeout(30)
+                
+                driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+                
+                if account_data:
+                    update_account_status(account_data, "Driver sẵn sàng")
+                return driver
+            except Exception as e:
+                error_msg = f"Lỗi driver: {str(e)[:30]}"
+                errors.append(error_msg)
+                
+                try:
+                    simple_options = Options()
+                    simple_options.add_argument('--headless')
+                    simple_options.add_argument('--no-sandbox')
+                    simple_options.add_argument('--disable-dev-shm-usage')
+                    simple_options.add_argument('--single-process')
+                    simple_options.add_argument(f'--user-agent={user_agent}')
+                    
+                    if chrome_path:
+                        simple_options.binary_location = chrome_path
+                    
+                    service = Service(executable_path=chromedriver_path)
+                    driver = webdriver.Chrome(service=service, options=simple_options)
+                    driver.set_page_load_timeout(60)
+                    
+                    if account_data:
+                        update_account_status(account_data, "Driver sẵn sàng (cấu hình đơn giản)")
+                    return driver
+                except Exception as e2:
+                    errors.append(f"Lỗi cấu hình đơn giản: {str(e2)[:30]}")
+    
+    try:
+        from webdriver_manager.chrome import ChromeDriverManager
+        from webdriver_manager.core.utils import ChromeType
+        
+        if RUNNING_IN_TERMUX:
+            chromedriver_path = ChromeDriverManager(chrome_type=ChromeType.CHROMIUM).install()
+        else:
+            chromedriver_path = ChromeDriverManager().install()
+        
+        service = Service(executable_path=chromedriver_path)
+        driver = webdriver.Chrome(service=service, options=chrome_options)
+        driver.set_page_load_timeout(60)
+        
+        if account_data:
+            update_account_status(account_data, "Driver sẵn sàng")
+        return driver
+    except ImportError:
+        pass
+    except Exception as e:
+        errors.append(f"Lỗi webdriver-manager: {str(e)[:30]}")
+    
+    error_message = "\nKHÔNG THỂ KHỞI TẠO CHROME DRIVER!\n"
+    for err in errors:
+        error_message += f"  - {err}\n"
+    
+    raise Exception(error_message)
+
+
+# ========== Các hàm xử lý job ==========
+def handle_follow_job(bot, data, account_id, account_data):
+    global stop_threads
+
+    if stop_threads:
+        return {"status": False, "message": "Thread dừng"}
+
+    username_to_follow = extract_username_from_job_data(data)
+    
+    if not username_to_follow:
+        error_msg = "Không thể trích xuất username từ job data"
+        update_account_status(account_data, error_msg, "error")
+        account_data["api_message"] = f" {error_msg}"
+        return {"status": False, "skip": True}
+
+    username_to_follow = username_to_follow.lower()
+    account_data["api_message"] = f" {username_to_follow}"
+    
+    try:
+        result = bot.FOLLOW(username_to_follow)
+
+        if result and result.get('status'):
+            update_account_status(account_data, f" {username_to_follow}")
+            account_data["api_message"] = f" Follow: {username_to_follow}"
+            return {"status": True, "message": result.get('message', 'Follow thành công')}
+        else:
+            error_msg = result.get('message', 'Lỗi không xác định') if result else "Không có phản hồi từ bot"
+            
+            account_data["api_message"] = f" {error_msg[:50]}"
+            update_account_status(account_data, f" {error_msg[:50]}", "warning")
+            
+            if kiem_tra_checkpoint(error_msg):
+                increment_error(account_data, 'checkpoint')
+                update_account_status(account_data, "CHECKPOINT", "error")
+                account_data["is_running"] = False
+                account_data["api_message"] = " TÀI KHOẢN BỊ CHECKPOINT"
+                return {"status": False, "message": error_msg, "fatal": True, "checkpoint": True}
+            
+            if kiem_tra_rate_limit(error_msg):
+                increment_error(account_data, 'rate_limit')
+                # Rate limit 429 - tăng thời gian chờ lên
+                wait_time = random.randint(60, 120)
+                account_data["rate_limit_until"] = time.time() + wait_time
+                account_data["api_message"] = f" Rate limit 429, nghỉ {wait_time}s"
+                return {"status": False, "message": error_msg, "retry": True, "wait": wait_time}
+            
+            increment_error(account_data, 'follow')
+            return {"status": False, "message": error_msg}
+
+    except Exception as e:
+        increment_error(account_data, 'other')
+        error_msg = str(e)
+        update_account_status(account_data, f"Lỗi: {error_msg[:20]}", "error")
+        account_data["api_message"] = f" Exception: {error_msg[:20]}"
+        return {"status": False, "message": f"exception: {error_msg}"}
+
+def handle_like_job(bot, link, account_id, account_data):
+    global stop_threads
+
+    if stop_threads:
+        return {"status": False, "message": "Thread dừng"}
+
+    update_account_status(account_data, "Đang xử lý like...")
+    account_data["api_message"] = " Đang like..."
+    
+    try:
+        result = bot.LIKE(link)
+
+        if result['status']:
+            update_account_status(account_data, "Like thành công")
+            account_data["api_message"] = " Like thành công"
+            return {"status": True, "message": result.get('message', 'Like thành công')}
+        else:
+            error_msg = result.get('message', 'Lỗi không xác định')
+            update_account_status(account_data, f"Like thất bại: {error_msg}", "warning")
+            account_data["api_message"] = f" {error_msg[:50]}"
+            
+            if kiem_tra_checkpoint(error_msg):
+                increment_error(account_data, 'checkpoint')
+                update_account_status(account_data, "CHECKPOINT - Dừng tài khoản", "error")
+                account_data["is_running"] = False
+                return {"status": False, "message": error_msg, "fatal": True, "checkpoint": True}
+            
+            if kiem_tra_rate_limit(error_msg):
+                increment_error(account_data, 'rate_limit')
+                wait_time = random.randint(60, 120)
+                account_data["rate_limit_until"] = time.time() + wait_time
+                update_account_status(account_data, f"Rate limit 429 - nghỉ {wait_time}s", "warning")
+                account_data["api_message"] = f" Rate limit 429, nghỉ {wait_time}s"
+                return {"status": False, "message": error_msg, "retry": True, "wait": wait_time}
+            
+            increment_error(account_data, 'like')
+            return {"status": False, "message": error_msg}
+
+    except Exception as e:
+        increment_error(account_data, 'other')
+        error_msg = f"exception: {str(e)[:50]}"
+        update_account_status(account_data, f"Lỗi: {str(e)[:30]}", "error")
+        account_data["api_message"] = f" {str(e)[:30]}"
+        return {"status": False, "message": error_msg}
+
+def handle_comment_job(bot, link, comment_text, account_id, account_data):
+    global stop_threads
+
+    if stop_threads:
+        return {"status": False, "message": "Thread dừng"}
+
+    # FIX: Kiểm tra nội dung comment ngay từ đầu - nếu không có thì bỏ qua luôn
+    if not comment_text or comment_text == '' or comment_text.strip() == '':
+        error_msg = "Job comment không có nội dung - bỏ qua"
+        update_account_status(account_data, error_msg, "warning")
+        account_data["api_message"] = " ⚠ Comment rỗng, bỏ qua"
+        return {"status": False, "skip": True, "message": error_msg}
+
+    update_account_status(account_data, "Đang xử lý comment...")
+    account_data["api_message"] = " Đang comment..."
+    
+    try:
+        result = bot.COMMENT(link, comment_text)
+
+        if result['status']:
+            update_account_status(account_data, "Comment thành công")
+            account_data["api_message"] = " Comment thành công"
+            return {"status": True, "message": result.get('message', 'Comment thành công')}
+        else:
+            error_msg = result.get('message', 'Lỗi không xác định')
+            update_account_status(account_data, f"Comment thất bại: {error_msg}", "warning")
+            account_data["api_message"] = f" {error_msg[:50]}"
+            
+            if kiem_tra_checkpoint(error_msg):
+                increment_error(account_data, 'checkpoint')
+                update_account_status(account_data, "CHECKPOINT - Dừng tài khoản", "error")
+                account_data["is_running"] = False
+                return {"status": False, "message": error_msg, "fatal": True, "checkpoint": True}
+            
+            if kiem_tra_rate_limit(error_msg):
+                increment_error(account_data, 'rate_limit')
+                wait_time = random.randint(60, 120)
+                account_data["rate_limit_until"] = time.time() + wait_time
+                update_account_status(account_data, f"Rate limit 429 - nghỉ {wait_time}s", "warning")
+                account_data["api_message"] = f" Rate limit 429, nghỉ {wait_time}s"
+                return {"status": False, "message": error_msg, "retry": True, "wait": wait_time}
+            
+            increment_error(account_data, 'comment')
+            return {"status": False, "message": error_msg}
+
+    except Exception as e:
+        increment_error(account_data, 'other')
+        error_msg = f"exception: {str(e)[:50]}"
+        update_account_status(account_data, f"Lỗi: {str(e)[:30]}", "error")
+        account_data["api_message"] = f" {str(e)[:30]}"
+        return {"status": False, "message": error_msg}
+
+
+# ========== Các hàm kiểm tra lỗi ==========
+def increment_error(account_data, error_type='other'):
+    if "error_counts" not in account_data:
+        account_data["error_counts"] = {'follow': 0, 'like': 0, 'comment': 0, 'checkpoint': 0, 'rate_limit': 0, 'other': 0}
+    account_data["error_counts"][error_type] = account_data["error_counts"].get(error_type, 0) + 1
+    account_data["session_errors"] = account_data.get("session_errors", 0) + 1
+    account_data["last_error_time"] = time.time()
+
+def kiem_tra_cookie_die(error_msg, status_code):
+    cookie_die_messages = [
+        'login_required', 'checkpoint_required', 'forbidden',
+        'not_authorized', 'unauthorized', 'invalid_token',
+        'The access token is invalid', 'cookie invalid'
+    ]
+    
+    if status_code in [401, 403]:
+        return True
+    if any(msg in str(error_msg).lower() for msg in cookie_die_messages):
+        return True
+    return False
+
+def kiem_tra_checkpoint(error_msg):
+    checkpoint_messages = ['checkpoint_required', 'checkpoint', 'challenge_required', 'challenge']
+    if any(msg in str(error_msg).lower() for msg in checkpoint_messages):
+        return True
+    return False
+
+def kiem_tra_rate_limit(error_msg):
+    """Kiểm tra rate limit - đúng chuẩn 429"""
+    # Kiểm tra status code 429
+    if "429" in str(error_msg):
+        return True
+    # Kiểm tra message rate limit
+    rate_messages = ['rate_limit', 'too many requests', 'please wait', 'rate limit', '429']
+    if any(msg in str(error_msg).lower() for msg in rate_messages):
+        return True
+    return False
+
+
+# ========== Hàm gọi API Golike với lock để tránh đá nhau ==========
+def chonacc(headers):
+    """Lấy danh sách Instagram account từ Golike - CÓ LOCK"""
+    url = 'https://gateway.golike.net/api/instagram-account'
+    with api_lock:
+        try:
+            response = requests.get(url, headers=headers, timeout=15, verify=False)
+            
+            try:
+                result = response.json()
+            except:
+                result = {}
+            
+            if response.status_code == 200:
+                if isinstance(result, dict) and (result.get('status') == 200 or result.get('success') == True):
+                    return {"status": True, "data": result.get('data', [])}
+                else:
+                    error_msg = result.get('message') or result.get('msg') or f"HTTP {response.status_code}"
+                    return {"status": False, "message": error_msg}
+            else:
+                error_msg = result.get('message') or result.get('msg') or f"HTTP {response.status_code}"
+                return {"status": False, "message": error_msg}
+        except requests.exceptions.Timeout:
+            return {"status": False, "message": "Timeout khi kết nối Golike"}
+        except requests.exceptions.ConnectionError:
+            return {"status": False, "message": "Lỗi kết nối Golike"}
+        except Exception as e:
+            return {"status": False, "message": str(e)}
+
+def nhannv(account_id, headers):
+    """Nhận job từ Golike - CÓ LOCK"""
+    params = {
+        'instagram_account_id': account_id,
+        'data': 'null'
+    }
+    url = 'https://gateway.golike.net/api/advertising/publishers/instagram/jobs'
+    with api_lock:
+        try:
+            response = requests.get(url, headers=headers, params=params, timeout=20, verify=False)
+            
+            try:
+                result = response.json()
+            except:
+                result = {}
+            
+            if response.status_code == 200:
+                if isinstance(result, dict) and (result.get('status') == 200 or result.get('success') == True):
+                    return {"status": True, "data": result.get('data')}
+                else:
+                    error_msg = result.get('message') or result.get('msg') or f"HTTP {response.status_code}"
+                    return {"status": False, "message": error_msg}
+            else:
+                error_msg = result.get('message') or result.get('msg') or f"HTTP {response.status_code}"
+                return {"status": False, "message": error_msg}
+        except requests.exceptions.Timeout:
+            return {"status": False, "message": "Timeout khi kết nối Golike"}
+        except requests.exceptions.ConnectionError:
+            return {"status": False, "message": "Lỗi kết nối Golike"}
+        except Exception as e:
+            return {"status": False, "message": str(e)}
+
+def hoanthanh(ads_id, account_id, headers):
+    """Hoàn thành job - CÓ LOCK"""
+    json_data = {
+        'instagram_users_advertising_id': ads_id,
+        'instagram_account_id': account_id,
+        'async': True,
+        'data': None
+    }
+    with api_lock:
+        try:
+            response = requests.post('https://gateway.golike.net/api/advertising/publishers/instagram/complete-jobs',
+                                     headers=headers, json=json_data, timeout=15, verify=False)
+            
+            try:
+                result = response.json()
+            except:
+                result = {}
+            
+            if response.status_code == 200:
+                if isinstance(result, dict) and (result.get('status') == 200 or result.get('success') == True):
+                    return {"status": True, "data": result.get('data'), "message": result.get('message', 'Success')}
+                else:
+                    error_msg = result.get('message') or result.get('msg') or f"HTTP {response.status_code}"
+                    return {"status": False, "message": error_msg}
+            else:
+                error_msg = result.get('message') or result.get('msg') or f"HTTP {response.status_code}"
+                return {"status": False, "message": error_msg}
+        except requests.exceptions.Timeout:
+            return {"status": False, "message": "Timeout khi hoàn thành"}
+        except requests.exceptions.ConnectionError:
+            return {"status": False, "message": "Lỗi kết nối khi hoàn thành"}
+        except Exception as e:
+            return {"status": False, "message": str(e)}
+
+def baoloi(ads_id, object_id, account_id, loai, headers):
+    """Báo lỗi job - CÓ LOCK"""
+    json_data1 = {
+        'description': 'Đã làm Job này rồi',
+        'users_advertising_id': ads_id,
+        'type': 'ads',
+        'provider': 'instagram',
+        'fb_id': account_id,
+        'error_type': 6
+    }
+    try:
+        requests.post('https://gateway.golike.net/api/report/send', headers=headers, json=json_data1, timeout=8, verify=False)
+    except:
+        pass
+    
+    json_data = {
+        'ads_id': ads_id,
+        'object_id': object_id,
+        'account_id': account_id,
+        'type': loai
+    }
+    with api_lock:
+        try:
+            response = requests.post('https://gateway.golike.net/api/advertising/publishers/instagram/skip-jobs',
+                                    headers=headers, json=json_data, timeout=8, verify=False)
+            
+            try:
+                result = response.json()
+            except:
+                result = {}
+            
+            if response.status_code == 200:
+                if isinstance(result, dict) and (result.get('status') == 200 or result.get('success') == True):
+                    return {"status": True, "message": result.get('message', 'Success')}
+                else:
+                    error_msg = result.get('message') or result.get('msg') or f"HTTP {response.status_code}"
+                    return {"status": False, "message": error_msg}
+            else:
+                error_msg = result.get('message') or result.get('msg') or f"HTTP {response.status_code}"
+                return {"status": False, "message": error_msg}
+        except Exception as e:
+            return {"status": False, "message": str(e)}
+
+
+# ========== Hàm banner ==========
+def banner():
+    os.system('clear' if os.name == 'posix' else 'cls')
+    banner_text = """
+      \033[38;2;153;51;255m▄▄▄█████▓ █    ██   ██████    ▄▄▄█████▓ ▒█████   ▒█████   ██▓
+      \033[38;2;170;70;255m▓  ██▒ ▓▒ ██  ▓██▒▒██    ▒    ▓  ██▒ ▓▒▒██▒  ██▒▒██▒  ██▒▓██▒
+      \033[38;2;190;90;255m▒ ▓██░ ▒░▓██  ▒██░░ ▓██▄      ▒ ▓██░ ▒░▒██░  ██▒▒██░  ██▒▒██░
+      \033[38;2;210;110;240m░ ▓██▓ ░ ▓▓█  ░██░  ▒   ██▒   ░ ▓██▓ ░ ▒██   ██░▒██   ██░▒██░
+      \033[38;2;230;130;220m  ▒██▒ ░ ▒▒█████▓ ▒██████▒▒     ▒██▒ ░ ░ ████▓▒░░ ████▓▒░░██████▒
+      \033[38;2;240;150;200m  ▒ ░░   ░▒▓▒ ▒ ▒ ▒ ▒▓▒ ▒ ░     ▒ ░░   ░ ▒░▒░▒░ ░ ▒░▒░▒░ ░ ▒░▓  ░
+      \033[38;2;200;200;255m    ░    ░░▒░ ░ ░ ░ ░▒  ░ ░       ░      ░ ▒ ▒░   ░ ▒ ▒░ ░ ░ ▒  ░
+      \033[38;2;150;230;255m  ░       ░░░ ░ ░ ░  ░  ░       ░      ░ ░ ░ ▒  ░ ░ ░ ▒    ░ ░
+      \033[38;2;120;255;230m            ░           ░                  ░ ░      ░ ░      ░  ░
+\033[0m
+\033[38;2;255;200;140m[\033[38;2;245;245;245m</>\033[38;2;255;200;140m] \033[38;2;200;160;255mADMIN:\033[38;2;255;235;180m NHƯ ANH ĐÃ THẤY EM   \033[38;2;255;220;160mPhiên Bản: \033[38;2;120;255;220mv3.4
+\033[38;2;255;200;140m[\033[38;2;245;245;245m</>\033[38;2;255;200;140m] \033[38;2;200;160;255mNhóm Telegram: \033[38;2;120;255;220mhttps://t.me/se_meo_bao_an
+\033[38;2;190;235;210m───────────────────────────────────────────────────────────────────────\033[0m
+"""
+    print(banner_text)
+
+
+# ========== HÀM XÂY DỰNG BẢNG DASHBOARD ==========
+def build_table():
+    table = Table(box=box.SQUARE, title="[bold cyan]DASHBOARD INSTAGRAM TOOL[/bold cyan]")
+
+    table.add_column("STT", justify="center", style="dim", width=4)
+    table.add_column("Username", style="cyan", width=12)
+    table.add_column("Nick Golike", style="yellow", width=12)
+    table.add_column("Trạng thái", style="bold", justify="center", width=12)
+    table.add_column("Đã làm", justify="center", style="green", width=6)
+    table.add_column("Bỏ qua", justify="center", style="red", width=6)
+    table.add_column("Follow", justify="center", width=5)
+    table.add_column("Like", justify="center", width=5)
+    table.add_column("Comment", justify="center", width=6)
+    table.add_column("Coin", justify="center", style="yellow", width=5)
+    table.add_column("Chi tiết", style="magenta", width=25)
+
+    for i, (acc_id, data) in enumerate(all_accounts_data.items(), 1):
+        if not data.get("is_running", True):
+            status = "Đã dừng"
+            status_color = "red"
+        elif "checkpoint" in data.get("status", "").lower():
+            status = "CHECKPOINT"
+            status_color = "red"
+        elif "die" in data.get("status", "").lower():
+            status = "DIE"
+            status_color = "red"
+        elif data.get("rate_limit_until", 0) > time.time():
+            status = "RATE LIMIT"
+            status_color = "yellow"
+        elif "rate limit" in data.get("status", "").lower():
+            status = "GIỚI HẠN"
+            status_color = "yellow"
+        elif "nghỉ" in data.get("status", "").lower():
+            status = "NGHỈ"
+            status_color = "yellow"
+        else:
+            status = "ĐANG CHẠY"
+            status_color = "green"
+        
+        if data.get("api_message"):
+            detail = data["api_message"]
+        else:
+            detail = data.get("detail_status", data.get("status", ""))
+        
+        if len(detail) > 25:
+            detail = detail[:22] + "..."
+            
+        golike_name = data.get("golike_username", "-")[:10]
+            
+        table.add_row(
+            str(i),
+            data.get("username", "")[:10],
+            golike_name,
+            f"[{status_color}]{status}[/{status_color}]",
+            str(data.get("done", 0)),
+            str(data.get("skip", 0)),
+            str(data.get("follow", 0)),
+            str(data.get("like", 0)),
+            str(data.get("comment", 0)),
+            str(data.get("coin", 0)),
+            detail
+        )
+
+    return table
+
+def countdown_delay(account_id, account_data, total_seconds, message="Đợi"):
+    """Hiển thị đếm ngược thời gian delay, đồng thời reset api_message"""
+    global stop_threads
+    
+    if total_seconds > 10:
+        variation = random.uniform(-2, 2)
+        total_seconds = max(3, total_seconds + variation)
+    
+    account_data["api_message"] = f" {message} {int(total_seconds)}s"
+    
+    for i in range(int(total_seconds), 0, -1):
+        if stop_threads:
+            return
+        account_data["api_message"] = f" {message} {i}s"
+        update_account_status(account_data, f"{message} {i}s")
+        time.sleep(1)
+    
+    account_data["api_message"] = ""
+
+
+# ========== Hàm chạy cho mỗi account trong thread riêng ==========
+def run_account(account_id, account_data, headers, lam, delay_config, lannhan, doiacc, job_nghi, thoi_gian_nghi):
+    global stop_threads, bot_instances
+    
+    account_data["thread_id"] = threading.current_thread().ident
+    cookies = account_data["cookie"]
+    username = account_data["username"]
+    checkdoiacc = 0
+    
+    try:
+        bot = INSTAGRAM(cookies, account_data)
+        update_account_status(account_data, "Đang đăng nhập...")
+        
+        login_success = bot.login_with_cookies()
+        if not login_success:
+            update_account_status(account_data, "Đăng nhập thất bại", "error")
+            account_data["is_running"] = False
+            return
+        
+        bot_instances[account_id] = bot
+        update_account_status(account_data, "Đăng nhập thành công")
+    except Exception as e:
+        update_account_status(account_data, f"Lỗi: {str(e)[:30]}", "error")
+        account_data["is_running"] = False
+        return
+    
+    update_account_status(account_data, "Bắt đầu chạy...")
+    account_data["is_running"] = True
+    
+    delay_job_range = delay_config.get("job", [3, 7])
+    delay_done = delay_config.get("done", 5)
+    delay_error = delay_config.get("error", 10)
+    
+    while not stop_threads and account_data.get("is_running", True):
+        try:
+            # Kiểm tra rate limit
+            if account_data.get("rate_limit_until", 0) > time.time():
+                remaining = int(account_data["rate_limit_until"] - time.time())
+                if remaining > 0:
+                    account_data["api_message"] = f" Rate limit 429, nghỉ {remaining}s"
+                    time.sleep(min(remaining, 5))
+                    continue
+            
+            account_data["api_message"] = " Đang tìm job..."
+            
+            if checkdoiacc >= doiacc and doiacc > 0:
+                update_account_status(account_data, f"Đạt giới hạn lỗi ({doiacc})", "error")
+                account_data["is_running"] = False
+                break
+
+            update_account_status(account_data, "Đang lấy job...")
+            nhanjob = nhannv(account_id, headers)
+            
+            if isinstance(nhanjob, dict):
+                if nhanjob.get('status') == True:
+                    data = nhanjob.get('data')
+                    
+                    if not isinstance(data, dict):
+                        update_account_status(account_data, "Dữ liệu job không hợp lệ", "warning")
+                        account_data["api_message"] = " Dữ liệu job lỗi"
+                        time.sleep(random.uniform(4, 7))
+                        continue
+                        
+                    ads_id = data.get('id')
+                    link = data.get('link')
+                    object_id = data.get('object_id')
+                    loai = data.get('type')
+                    object_data = data.get('object_data', {})
+                    
+                    update_account_status(account_data, f"Nhận job: {loai}")
+                    
+                    if not isinstance(object_data, dict):
+                        object_data = {}
+                        
+                    if not object_id or not loai:
+                        update_account_status(account_data, "Thiếu thông tin job", "warning")
+                        account_data["api_message"] = " Thiếu thông tin job"
+                        time.sleep(random.uniform(1.5, 3))
+                        continue
+                else:
+                    msg = nhanjob.get('message', 'Không có job')
+                    update_account_status(account_data, f"API: {msg}")
+                    account_data["api_message"] = f" {msg[:45]}"
+                    wait_time = random.randint(delay_job_range[0], delay_job_range[1])
+                    countdown_delay(account_id, account_data, wait_time, "Chờ job")
+                    continue
+            else:
+                time.sleep(random.uniform(4, 7))
+                continue
+
+            if loai not in lam:
+                update_account_status(account_data, f"Bỏ qua {loai} (không trong cấu hình)")
+                account_data["api_message"] = f" Bỏ qua {loai}"
+                try:
+                    baoloi(ads_id, object_id, account_id, loai, headers)
+                    with account_locks[account_id]:
+                        account_data["skip"] += 1
+                    time.sleep(random.uniform(0.8, 1.5))
+                    continue
+                except:
+                    time.sleep(random.uniform(0.8, 1.5))
+                    continue
+
+            success = {"status": False, "message": "Không xác định"}
+            
+            if loai == "follow":
+                update_account_status(account_data, f"Xử lý follow...")
+                account_data["api_message"] = f" Đang xử lý follow job"
+                success = handle_follow_job(bot, data, account_id, account_data)
+                
+            elif loai == "like":
+                success = handle_like_job(bot, link, account_id, account_data)
+                
+            elif loai == "comment":
+                if isinstance(object_data, dict):
+                    comment_text = object_data.get('comment', '')
+                else:
+                    comment_text = ''
+                    
+                # FIX: Kiểm tra comment text trước khi xử lý
+                if not comment_text or comment_text.strip() == '':
+                    update_account_status(account_data, "Job comment không có nội dung - bỏ qua", "warning")
+                    account_data["api_message"] = " ⚠ Comment rỗng, bỏ qua"
+                    with account_locks[account_id]:
+                        account_data["skip"] += 1
+                    try:
+                        baoloi(ads_id, object_id, account_id, loai, headers)
+                    except:
+                        pass
+                    time.sleep(random.uniform(1, 2))
+                    continue
+                    
+                success = handle_comment_job(bot, link, comment_text, account_id, account_data)
+
+            if success.get('retry') and success.get('wait'):
+                wait_time = success['wait']
+                update_account_status(account_data, f"Rate limit - nghỉ {wait_time}s", "warning")
+                account_data["api_message"] = f" Rate limit 429, nghỉ {wait_time}s"
+                countdown_delay(account_id, account_data, wait_time, "Nghỉ rate limit")
+                continue
+
+            if success.get('fatal'):
+                if success.get('checkpoint'):
+                    update_account_status(account_data, "Dừng: CHECKPOINT", "error")
+                    account_data["is_running"] = False
+                else:
+                    update_account_status(account_data, "Dừng: COOKIE HẾT HẠN", "error")
+                    account_data["is_running"] = False
+                break
+
+            if success.get('skip'):
+                with account_locks[account_id]:
+                    account_data["skip"] += 1
+                time.sleep(random.uniform(0.8, 1.5))
+                continue
+
+            if success.get('retry'):
+                continue
+
+            if success.get('status'):
+                account_data["job_counter"] += 1
+            
+            if job_nghi > 0 and account_data["job_counter"] > 0 and account_data["job_counter"] % job_nghi == 0:
+                update_account_status(account_data, f"Đã làm {account_data['job_counter']} job, nghỉ {thoi_gian_nghi}s")
+                countdown_delay(account_id, account_data, thoi_gian_nghi, "Nghỉ")
+
+            if success.get('status'):
+                update_account_status(account_data, "Đang nhận tiền...")
+                account_data["api_message"] = " Đang nhận tiền..."
+                try:
+                    nhantien = hoanthanh(ads_id, account_id, headers)
+                except Exception as e:
+                    update_account_status(account_data, "Lỗi nhận tiền", "warning")
+                    account_data["api_message"] = f"⚠ Lỗi nhận tiền: {str(e)[:20]}"
+                    time.sleep(random.uniform(1.5, 3))
+                    continue
+
+                if lannhan == 'y':
+                    checklan = 1
+                else:
+                    checklan = 2
+
+                ok = 0
+                while checklan <= 2 and not stop_threads:
+                    if isinstance(nhantien, dict) and nhantien.get('status') == True:
+                        ok = 1
+                        tien = 0
+                        if nhantien.get('data') and isinstance(nhantien.get('data'), dict):
+                            tien = nhantien.get('data', {}).get('prices', 0)
+                        
+                        with account_locks[account_id]:
+                            account_data["done"] += 1
+                            account_data["coin"] += tien
+                            
+                            if loai == "follow":
+                                account_data["follow"] += 1
+                            elif loai == "like":
+                                account_data["like"] += 1
+                            elif loai == "comment":
+                                account_data["comment"] += 1
+                            
+                            update_account_status(account_data, f"Thành công +{tien} coin")
+                            account_data["api_message"] = f" +{tien} coin"
+                        
+                        checkdoiacc = 0
+                        break
+                    
+                    checklan += 1
+                    if checklan == 3:
+                        break
+                    
+                    time.sleep(random.uniform(2, 4))
+                    account_data["api_message"] = " Đang nhận tiền lần 2..."
+                    
+                    try:
+                        nhantien = hoanthanh(ads_id, account_id, headers)
+                        if not isinstance(nhantien, dict):
+                            nhantien = {"status": False, "message": "Phản hồi không hợp lệ"}
+                    except:
+                        nhantien = {"status": False, "message": "Exception"}
+
+                if ok != 1:
+                    error_msg = nhantien.get('message', 'Không nhận được tiền') if isinstance(nhantien, dict) else 'Không nhận được tiền'
+                    update_account_status(account_data, f"Lỗi nhận tiền: {error_msg[:30]}", "warning")
+                    account_data["api_message"] = f"⚠ {error_msg[:40]}"
+                    try:
+                        baoloi(ads_id, object_id, account_id, loai, headers)
+                        with account_locks[account_id]:
+                            account_data["skip"] += 1
+                        checkdoiacc += 1
+                        time.sleep(random.uniform(0.8, 1.5))
+                    except:
+                        time.sleep(random.uniform(0.8, 1.5))
+            else:
+                try:
+                    baoloi(ads_id, object_id, account_id, loai, headers)
+                    with account_locks[account_id]:
+                        account_data["skip"] += 1
+                    checkdoiacc += 1
+                    time.sleep(random.uniform(0.8, 1.5))
+                except:
+                    time.sleep(random.uniform(0.8, 1.5))
+            
+            if loai in delay_config:
+                delay_range = delay_config[loai]
+                delay_time = random.randint(delay_range[0], delay_range[1])
+            else:
+                delay_time = delay_done
+            
+            if delay_time > 0:
+                countdown_delay(account_id, account_data, delay_time, f"Delay {loai}")
+                    
+        except Exception as e:
+            update_account_status(account_data, f"Lỗi: {str(e)[:20]}", "error")
+            account_data["api_message"] = f"⚠ {str(e)[:20]}"
+            time.sleep(random.uniform(delay_error * 0.8, delay_error * 1.2))
+            continue
+    
+    try:
+        bot.close()
+    except:
+        pass
+    
+    with account_locks[account_id]:
+        account_data["is_running"] = False
+        if not account_data["status"].startswith("Dừng"):
+            update_account_status(account_data, "Đã dừng")
+
+
+# ========== Hàm khởi tạo và chạy tool ==========
+def start_tool():
+    """Hàm chính để khởi tạo và chạy tool"""
+    global all_accounts_data, stop_threads, console, system_status
+    
+    console = Console()
+    
+    if not check_and_install_selenium():
+        print("\033[1;31mThiếu selenium. Tool không thể chạy!")
+        sys.exit(1)
     
     banner()
+    current_ip = get_public_ip()
+    print(f"\033[1;97m Địa chỉ IP: \033[1;32m{current_ip}")
+    print("\033[1;97m═══════════════════════════════════════════════════════════════════")
     
-    load_gui_template_once()
+    selected_golike_accounts = display_auth_and_select_accounts()
     
-    auth_token = display_auth_menu()
-    console.print(u"✓ Đã chọn Authorization")
-    time.sleep(1)
+    if not selected_golike_accounts:
+        print("\033[1;31mKhông có nick Golike nào được chọn!")
+        sys.exit(1)
     
-    console.print(u"[yellow] CẤU HÌNH DELAY VÀ THÔNG SỐ[/]")
-    delay_config, min_follow_price, force_stop_enabled, force_stop_after = setup_delay_config()
+    print(f"\033[1;32m✓ Đã chọn {len(selected_golike_accounts)} nick Golike:")
+    for acc in selected_golike_accounts:
+        print(f"   - [cyan]{acc['username']}[/] | [yellow]{acc['coin']} coin[/]")
+    
+    all_selected_accounts = chon_accounts_de_chay(selected_golike_accounts)
+    
+    if not all_selected_accounts:
+        print("\033[1;31mKhông có tài khoản Instagram nào được chọn!")
+        sys.exit(1)
+    
+    console.print(f"\n[bold #6bffb8]✓ Tổng cộng {len(all_selected_accounts)} Instagram account sẽ chạy[/bold #6bffb8]")
+    time.sleep(2)
+    
+    delay_config = setup_delay_config()
     
     lam = menu_jobs()
     
-    console.print(u"[yellow]Tiến hành kết nối thiết bị ADB...[/]")
+    while True:
+        try:
+            job_nghi = int(input("\033[1;32mSau bao nhiêu job thành công thì nghỉ (0 = không nghỉ): ").strip())
+            if job_nghi >= 0:
+                break
+            else:
+                print("\033[1;31mNhập số >= 0!")
+        except:
+            print("\033[1;31mSai định dạng!")
     
-    selected_serials = select_devices()
-    
-    if not selected_serials:
-        console.print(u"[red]Không có thiết bị nào được chọn! Thoát tool.[/]")
-        sys.exit(1)
-    
-    console.print(u"✓ Đã chọn {} thiết bị để chạy song song".format(len(selected_serials)))
-    time.sleep(2)
-    
-    dashboard_thread = threading.Thread(target=run_dashboard, daemon=True)
-    dashboard_thread.start()
-    time.sleep(2)
-    
-    console.print(u"[bold green] BẮT ĐẦU CHẠY {} THIẾT BỊ SONG SONG[/]".format(len(selected_serials)))
-    
-    def run_worker(serial):
-        import os
-        if hasattr(os, 'nice'):
+    if job_nghi > 0:
+        while True:
             try:
-                os.nice(5)
+                thoi_gian_nghi = int(input("\033[1;32mThời gian nghỉ (giây): ").strip())
+                if thoi_gian_nghi > 0:
+                    break
+                else:
+                    print("\033[1;31mNhập số > 0!")
+            except:
+                print("\033[1;31mSai định dạng!")
+    else:
+        thoi_gian_nghi = 0
+    
+    while True:
+        lannhan = input("\033[1;32mNhận tiền lần 2 nếu lần 1 fail? (y/n): ").strip().lower()
+        if lannhan in ('y', 'n'):
+            break
+        print("\033[1;31mNhập y hoặc n!")
+    
+    while True:
+        try:
+            doiacc = int(input("\033[1;32mSố job fail để dừng tài khoản (0 = không dừng): ").strip())
+            break
+        except:
+            print("\033[1;31mNhập số!")
+    
+    banner()
+    current_ip = get_public_ip()
+    print(f"\033[1;97m IP: \033[1;32m{current_ip}")
+    print(f"\033[1;32m Số nick Golike: {len(selected_golike_accounts)} | Số Instagram account: {len(all_selected_accounts)}")
+    print(f"\033[1;32m Chế độ job: {lam}")
+    print(f"\033[1;32m Delay Follow: {delay_config['follow'][0]}-{delay_config['follow'][1]}s")
+    print(f"\033[1;32m Delay Like: {delay_config['like'][0]}-{delay_config['like'][1]}s")
+    print(f"\033[1;32m Delay Comment: {delay_config['comment'][0]}-{delay_config['comment'][1]}s")
+    if job_nghi > 0:
+        print(f"\033[1;32m Nghỉ {thoi_gian_nghi}s sau {job_nghi} job thành công")
+    print(f"\033[1;32m Giới hạn lỗi: {doiacc}")
+    print("\033[1;97m═══════════════════════════════════════════════════════════════════")
+    print("\033[1;33mĐang khởi động tool đa luồng...")
+    time.sleep(2)
+    
+    stop_threads = False
+    threads = []
+    
+    global all_accounts_data
+    all_accounts_data = all_selected_accounts
+    
+    for account_id, account_data in all_selected_accounts.items():
+        headers = {
+            'Accept-Language': 'vi,en-US;q=0.9,en;q=0.8',
+            'Referer': 'https://app.golike.net/',
+            'Sec-Ch-Ua': '"Not A(Brand";v="99", "Google Chrome";v="121", "Chromium";v="121"',
+            'Sec-Ch-Ua-Mobile': '?0',
+            'Sec-Ch-Ua-Platform': "Windows",
+            'Sec-Fetch-Dest': 'empty',
+            'Sec-Fetch-Mode': 'cors',
+            'Sec-Fetch-Site': 'same-site',
+            'T': 'VFZSak1FMTZZM3BOZWtFd1RtYzlQUT09',
+            'User-Agent': 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36',
+            "Authorization": account_data.get('golike_auth'),
+            'Content-Type': 'application/json;charset=utf-8'
+        }
+        
+        t = threading.Thread(target=run_account, args=(account_id, account_data, headers, lam, delay_config, lannhan, doiacc, job_nghi, thoi_gian_nghi))
+        t.daemon = True
+        t.start()
+        threads.append(t)
+        thread_status[account_id] = "running"
+        time.sleep(0.3)
+    
+    os.system('clear' if os.name == 'posix' else 'cls')
+    
+    try:
+        with Live(build_table(), console=console, refresh_per_second=2, screen=True) as live:
+            while any(t.is_alive() for t in threads):
+                live.update(build_table())
+                time.sleep(0.5)
+                
+                if not any(t.is_alive() for t in threads):
+                    break
+    except KeyboardInterrupt:
+        print("\n\033[1;33mĐang dừng các thread...")
+        stop_threads = True
+        
+        for t in threads:
+            t.join(timeout=5)
+        
+        for bot in bot_instances.values():
+            try:
+                bot.close()
             except:
                 pass
         
-        bot = TikTokBot(
-            serial=serial,
-            auth_token=auth_token,
-            golike_username="",
-            account_id_val="",
-            delay_config=delay_config,
-            lam=lam,
-            force_stop_enabled=force_stop_enabled,
-            force_stop_after=force_stop_after,
-            min_follow_price=min_follow_price
-        )
-        bot.run()
-        return serial
-    
-    with ThreadPoolExecutor(max_workers=len(selected_serials)) as executor:
-        futures = {executor.submit(run_worker, serial): serial for serial in selected_serials}
+        print("\033[1;32m═══════════════════════════════════════════════════════════════════")
+        print("\033[1;33mKẾT QUẢ:")
+        total_done = sum(acc.get("done", 0) for acc in all_selected_accounts.values())
+        total_coin = sum(acc.get("coin", 0) for acc in all_selected_accounts.values())
         
-        try:
-            for future in as_completed(futures):
-                serial = futures[future]
-                try:
-                    future.result()
-                except:
-                    pass
-        except KeyboardInterrupt:
-            console.print(u"\n[yellow] Đang dừng tất cả các luồng...[/]")
-            set_stop_all()
-            for future in futures:
-                future.cancel()
+        golike_stats = {}
+        for acc_id, acc in all_selected_accounts.items():
+            golike_user = acc.get("golike_username", "Unknown")
+            if golike_user not in golike_stats:
+                golike_stats[golike_user] = {"done": 0, "coin": 0, "accounts": []}
+            golike_stats[golike_user]["done"] += acc.get("done", 0)
+            golike_stats[golike_user]["coin"] += acc.get("coin", 0)
+            golike_stats[golike_user]["accounts"].append(acc.get("username", "?"))
+        
+        for golike_user, stats in golike_stats.items():
+            print(f"\033[1;36m Nick Golike: {golike_user}")
+            print(f"   Instagram accounts: {', '.join(stats['accounts'])}")
+            print(f"   Jobs done: \033[1;32m{stats['done']}\033[0m | Coin: \033[1;33m{stats['coin']}\033[0m")
+        
+        print(f"\n\033[1;33mTỔNG: \033[1;32m{total_done} jobs \033[1;33m{total_coin} coin")
+        print("\033[1;32m═══════════════════════════════════════════════════════════════════")
+        print("\033[1;32mTạm biệt!")
+        sys.exit(0)
+
+
+# ========== Điểm vào chính ==========
+if __name__ == '__main__':
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    start_tool()
