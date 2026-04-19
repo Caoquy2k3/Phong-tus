@@ -53,10 +53,10 @@ def banner():
         f"Bạn bắt buộc phải tải lại bản update mới nhất.\n\n"
         f"[#ff9ecb]👉 Lấy link tải bản mới tại nhóm Telegram:[/]\n"
         f"[bold #00ffff]➤ https://t.me/se_meo_bao_an[/]\n\n"
-        f"[#888888](Vui lòng copy link trên và dán vào trình duyệt hoặc Telegram)[/]",
+        f"[#888888](Vui lòng copy link trên và dán vào trình duyệt hoặc Telegram TOOL TÊN tustool3.13.py)[/]",
         border_style="#ff4d6d",
         box=box.DOUBLE,
-        title="[bold #ff4d6d]YÊU CẦU CẬP NHẬT BẮT BUỘC TOOL TÊN tustool3.13.py[/]",
+        title="[bold #ff4d6d]YÊU CẦU CẬP NHẬT BẮT BUỘC[/]",
         title_align="center",
         width=65
     ))
