@@ -87,7 +87,7 @@ profile_cleanup_lock = threading.Lock()
 # ========== DANH SÁCH LINK DỰ PHÒNG CHO AUTO-ADD ==========
 # Nếu link từ API Golike bị lỗi verify, sẽ thử lần lượt các link này
 FALLBACK_LINKS = [
-    "https://www.instagram.com/evansnguyen.0104?igsh=MXU3azEzZGMxYmZhMQ==",
+    "https://www.instagram.com/evansnguyen.0104",
 ]
 
 
