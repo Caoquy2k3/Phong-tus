@@ -14,6 +14,7 @@ from queue import Queue
 from collections import defaultdict
 import urllib.parse
 import subprocess
+import shutil
 
 # THÊM IMPORT CHO RICH
 from rich.console import Console
@@ -72,10 +73,62 @@ os.makedirs(DATA_FOLDER, exist_ok=True)
 ACCOUNTS_SAVE_FILE = os.path.join(DATA_FOLDER, "saved_accounts.json")
 AUTH_FILE = os.path.join(DATA_FOLDER, "Authorization.json")
 GOLIKE_SELECTION_FILE = os.path.join(DATA_FOLDER, "golike_selection.json")
+PROFILES_FOLDER = os.path.join(DATA_FOLDER, "profiles")
+os.makedirs(PROFILES_FOLDER, exist_ok=True)
 
 # Lock toàn cục cho đa luồng ổn định
 global_lock = threading.RLock()
 driver_locks = defaultdict(threading.Lock)
+
+# Lưu trữ các profile path đã tạo để dọn dẹp sau
+created_profiles = defaultdict(str)
+profile_cleanup_lock = threading.Lock()
+
+# ========== DANH SÁCH LINK DỰ PHÒNG CHO AUTO-ADD ==========
+# Nếu link từ API Golike bị lỗi verify, sẽ thử lần lượt các link này
+FALLBACK_LINKS = [
+    "https://www.instagram.com/evansnguyen.0104?igsh=MXU3azEzZGMxYmZhMQ==",
+    "https://www.instagram.com/instagram/",
+    "https://www.instagram.com/facebook/",
+]
+
+
+# ========== HÀM QUẢN LÝ PROFILE ==========
+def get_profile_path(username):
+    """Tạo và trả về đường dẫn profile riêng cho mỗi username"""
+    safe_username = re.sub(r'[^a-zA-Z0-9_\-]', '_', username)
+    profile_path = os.path.join(PROFILES_FOLDER, safe_username)
+    
+    with profile_cleanup_lock:
+        created_profiles[username] = profile_path
+    
+    os.makedirs(profile_path, exist_ok=True)
+    return profile_path
+
+def cleanup_profile(username):
+    """Dọn dẹp thư mục profile sau khi đóng driver"""
+    with profile_cleanup_lock:
+        profile_path = created_profiles.pop(username, None)
+    
+    if profile_path and os.path.exists(profile_path):
+        try:
+            shutil.rmtree(profile_path, ignore_errors=True)
+        except Exception:
+            pass
+
+def cleanup_all_profiles():
+    """Dọn dẹp tất cả profile cũ khi khởi động lại tool"""
+    try:
+        if os.path.exists(PROFILES_FOLDER):
+            for item in os.listdir(PROFILES_FOLDER):
+                item_path = os.path.join(PROFILES_FOLDER, item)
+                if os.path.isdir(item_path):
+                    try:
+                        shutil.rmtree(item_path, ignore_errors=True)
+                    except Exception:
+                        pass
+    except Exception:
+        pass
 
 
 # ========== HÀM LẤY THÔNG TIN USER TỪ GOLIKE ==========
@@ -750,9 +803,9 @@ def extract_username_from_job_data(data):
     return None
 
 
-# ========== HÀM TỰ ĐỘNG ADD GOLIKE ==========
+# ========== HÀM TỰ ĐỘNG ADD GOLIKE (CÓ THỬ NHIỀU LINK DỰ PHÒNG) ==========
 def get_target_uid(link_target, cookie_str):
-    """Hàm lấy UID dựa trên logic API V1 mới"""
+    """Hàm lấy UID từ một link cụ thể"""
     headers_ig = {
         'accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
         'accept-language': 'en-US,en;q=0.9,vi-VN;q=0.8,vi;q=0.7',
@@ -765,60 +818,29 @@ def get_target_uid(link_target, cookie_str):
     }
     try:
         res = requests.get(link_target, headers=headers_ig, timeout=15, verify=False)
+        if res.status_code != 200:
+            return None
         
-        lt = re.findall(r'"target_id":"(\d+)"', res.text)
-        if lt:
-            return lt[0]
-            
-        match = re.search(r'"profile_id":"(\d+)"', res.text)
-        if match:
-            return match.group(1)
-            
-        match2 = re.search(r'"id":"(\d+)","is_verified"', res.text)
-        if match2:
-            return match2.group(1)
-            
+        # Các pattern tìm UID
+        patterns = [
+            r'"target_id":"(\d+)"',
+            r'"profile_id":"(\d+)"',
+            r'"id":"(\d+)","is_verified"',
+            r'"pk":"(\d+)"',
+            r'"user_id":"(\d+)"',
+            r'"owner":{"id":"(\d+)"}',
+        ]
+        
+        for pattern in patterns:
+            match = re.search(pattern, res.text)
+            if match:
+                return match.group(1)
         return None
     except:
         return None
 
-def auto_add_golike(username, cookie_str, headers_golike, golike_username):
-    """Hàm tự động thêm Golike sử dụng API V1 Follow - ĐÃ SỬA LỖI CHI TIẾT"""
-    console.print(f"[#ffa56b]➤ Account {username} chưa có trên Golike. Đang tiến hành thêm tự động vào nick [cyan]{golike_username}[/cyan]...[/#ffa56b]")
-    
-    console.print(f"[#6bb8ff]➤ Đang lấy link Verify từ API Golike...[/#6bb8ff]")
-    link_target = ""
-    try:
-        res_link = requests.get('https://gateway.golike.net/api/instagram-account', headers=headers_golike, timeout=15, verify=False)
-        
-        if res_link.status_code != 200:
-            try:
-                error_data = res_link.json()
-                error_msg = error_data.get('message') or error_data.get('msg') or f"HTTP {res_link.status_code}"
-            except:
-                error_msg = f"HTTP {res_link.status_code}"
-            console.print(f"[#ff6b6b]✗ Lỗi lấy link verify: {error_msg}[/#ff6b6b]")
-            return False, "-"
-        
-        link_target = res_link.json().get('link_verify_follow', '')
-        if link_target:
-            console.print(f"[#6bffb8]✓ Lấy thành công link verify: {link_target}[/#6bffb8]")
-        else:
-            console.print(f"[#ff6b6b]✗ API Golike không trả về link_verify_follow[/#ff6b6b]")
-            return False, "-"
-    except Exception as e:
-        console.print(f"[#ff6b6b]✗ Lỗi khi lấy link verify: {str(e)}[/#ff6b6b]")
-        return False, "-"
-
-    console.print(f"[#6bb8ff]➤ Đang lấy UID của mục tiêu...[/#6bb8ff]")
-    target_uid = get_target_uid(link_target, cookie_str)
-    
-    if not target_uid:
-        console.print(f"[#ff6b6b]✗ Lỗi: Không lấy được UID từ link {link_target}![/#ff6b6b]")
-        console.print(f"[dim]   → Cookie có thể đã hết hạn hoặc Instagram chặn[/dim]")
-        return False, "-"
-        
-    console.print(f"[#6bb8ff]➤ Đang follow ID {target_uid} bằng API V1...[/#6bb8ff]")
+def perform_follow(target_uid, cookie_str, username):
+    """Thực hiện follow một UID"""
     try:
         csrf = cookie_str.split("csrftoken=")[1].split(';')[0] if "csrftoken=" in cookie_str else ""
         
@@ -850,20 +872,15 @@ def auto_add_golike(username, cookie_str, headers_golike, golike_username):
         )
         
         if res_follow.status_code == 200 and 'friendship_status' in res_follow.text:
-            console.print(f"[#6bffb8] Follow thành công![/#6bffb8]")
+            return True, "Follow thành công"
         else:
-            console.print(f"[#ff6b6b] Lỗi: Follow thất bại (Response: {res_follow.status_code})[/#ff6b6b]")
-            return False, "-"
+            return False, f"Follow thất bại (Response: {res_follow.status_code})"
     except Exception as e:
-        console.print(f"[#ff6b6b] Lỗi thực thi Follow: {str(e)}[/#ff6b6b]")
-        return False, "-"
-    
-    console.print(f"[#6bb8ff]➤ Đợi 3 giây để Instagram ghi nhận Follow...[/#6bb8ff]")
-    time.sleep(3)
-        
-    console.print(f"[#6bb8ff]➤ Đang gửi yêu cầu Verify lên Golike...[/#6bb8ff]")
+        return False, f"Lỗi follow: {str(e)}"
+
+def call_verify_api(username, headers_golike, link_used=None):
+    """Gọi API verify-account lên Golike"""
     json_data = {'object_id': username}
-    
     try:
         res = requests.post('https://gateway.golike.net/api/instagram-account/verify-account', 
                         headers=headers_golike, json=json_data, timeout=15, verify=False)
@@ -875,15 +892,99 @@ def auto_add_golike(username, cookie_str, headers_golike, golike_username):
         
         if res.status_code == 200 and (resp_json.get('status') == 200 or resp_json.get('success') == True):
             new_acc_data = resp_json.get('data', {})
-            console.print(f"[bold #6bffb8]✓ Thêm và Match thành công {username} vào Golike![/bold #6bffb8]")
-            return True, new_acc_data.get('id', '-')
+            return True, new_acc_data.get('id', '-'), resp_json
         else:
             error_msg = resp_json.get('message') or resp_json.get('msg') or f"HTTP {res.status_code}"
-            console.print(f"[#ff6b6b]✗ Lỗi từ Golike: {error_msg}[/#ff6b6b]")
-            return False, "-"
+            return False, None, {"message": error_msg}
     except Exception as e:
-        console.print(f"[#ff6b6b]✗ Lỗi kết nối API Golike Verify: {str(e)}[/#ff6b6b]")
-        return False, "-"
+        return False, None, {"message": str(e)}
+
+def auto_add_golike(username, cookie_str, headers_golike, golike_username):
+    """
+    Hàm tự động thêm Golike sử dụng API V1 Follow
+    CÓ CƠ CHẾ THỬ NHIỀU LINK DỰ PHÒNG:
+    1. Lấy link từ API Golike
+    2. Nếu link đó fail (verify báo lỗi chưa follow), thử lần lượt các link trong FALLBACK_LINKS
+    """
+    console.print(f"[#ffa56b]➤ Account {username} chưa có trên Golike. Đang tiến hành thêm tự động vào nick [cyan]{golike_username}[/cyan]...[/#ffa56b]")
+    
+    # Bước 1: Lấy link verify từ API Golike
+    console.print(f"[#6bb8ff]➤ Đang lấy link Verify từ API Golike...[/#6bb8ff]")
+    api_link = None
+    try:
+        res_link = requests.get('https://gateway.golike.net/api/instagram-account', headers=headers_golike, timeout=15, verify=False)
+        
+        if res_link.status_code == 200:
+            api_link = res_link.json().get('link_verify_follow', '')
+            if api_link:
+                console.print(f"[#6bffb8]✓ Lấy thành công link verify: {api_link}[/#6bffb8]")
+            else:
+                console.print(f"[#ffa56b]⚠ API Golike không trả về link_verify_follow[/#ffa56b]")
+        else:
+            console.print(f"[#ffa56b]⚠ API trả về status {res_link.status_code}[/#ffa56b]")
+    except Exception as e:
+        console.print(f"[#ffa56b]⚠ Lỗi lấy link verify: {str(e)}[/#ffa56b]")
+    
+    # Tạo danh sách các link cần thử (ưu tiên link từ API, sau đó đến fallback links)
+    links_to_try = []
+    if api_link:
+        links_to_try.append(api_link)
+    links_to_try.extend(FALLBACK_LINKS)
+    
+    # Loại bỏ link trùng
+    links_to_try = list(dict.fromkeys(links_to_try))
+    
+    console.print(f"[#6bb8ff]➤ Sẽ thử {len(links_to_try)} link (API + dự phòng)[/#6bb8ff]")
+    
+    # Bước 2: Thử từng link
+    for idx, link_target in enumerate(links_to_try, 1):
+        console.print(f"\n[#ffa56b]--- Thử link {idx}/{len(links_to_try)}: {link_target[:50]}... ---[/#ffa56b]")
+        
+        # Lấy UID
+        console.print(f"[#6bb8ff]➤ Đang lấy UID...[/#6bb8ff]")
+        target_uid = get_target_uid(link_target, cookie_str)
+        
+        if not target_uid:
+            console.print(f"[#ff6b6b]✗ Không lấy được UID từ link này![/#ff6b6b]")
+            continue
+        
+        console.print(f"[#6bffb8]✓ Lấy UID thành công: {target_uid}[/#6bffb8]")
+        
+        # Thực hiện follow
+        console.print(f"[#6bb8ff]➤ Đang follow ID {target_uid}...[/#6bb8ff]")
+        follow_success, follow_msg = perform_follow(target_uid, cookie_str, username)
+        
+        if not follow_success:
+            console.print(f"[#ff6b6b]✗ {follow_msg}[/#ff6b6b]")
+            continue
+        
+        console.print(f"[#6bffb8]✓ {follow_msg}[/#6bffb8]")
+        console.print(f"[#6bb8ff]➤ Đợi 3 giây để Instagram ghi nhận Follow...[/#6bb8ff]")
+        time.sleep(3)
+        
+        # Gọi verify API
+        console.print(f"[#6bb8ff]➤ Đang gửi yêu cầu Verify lên Golike...[/#6bb8ff]")
+        verify_success, acc_id, resp_data = call_verify_api(username, headers_golike, link_target)
+        
+        if verify_success:
+            console.print(f"[bold #6bffb8]✓ Thêm và Match thành công {username} vào Golike! (ID: {acc_id})[/bold #6bffb8]")
+            return True, acc_id
+        else:
+            error_msg = resp_data.get('message', 'Lỗi không xác định')
+            console.print(f"[#ff6b6b]✗ Verify thất bại: {error_msg}[/#ff6b6b]")
+            
+            # Kiểm tra xem lỗi có phải do "chưa follow kênh đã chỉ định" không
+            if "chưa follow" in error_msg.lower() or "not follow" in error_msg.lower():
+                console.print(f"[#ffa56b]⚠ Link này không hợp lệ, thử link tiếp theo...[/#ffa56b]")
+                continue
+            else:
+                # Lỗi khác (có thể do checkpoint, rate limit,...) thì dừng lại
+                console.print(f"[#ff6b6b]✗ Lỗi verify không thể retry, dừng lại.[/#ff6b6b]")
+                return False, "-"
+    
+    # Đã thử hết các link nhưng đều thất bại
+    console.print(f"[#ff6b6b]✗ Đã thử {len(links_to_try)} link nhưng đều thất bại![/#ff6b6b]")
+    return False, "-"
 
 
 # ========== HÀM HIỂN THỊ DANH SÁCH GOLIKE ĐỂ CHỌN ==========
@@ -1356,7 +1457,7 @@ def chon_accounts_de_chay(selected_golike_accounts):
             "is_running": True,
             "thread_id": None,
             "job_counter": 0,
-            "rate_limit_until": 0  # Thêm biến lưu thời gian rate limit kết thúc
+            "rate_limit_until": 0
         }
         
         try:
@@ -1380,7 +1481,8 @@ class INSTAGRAM:
         self.account_data = account_data
         self.error_count = 0
         self.max_errors_before_reset = 3
-        self.driver_lock = threading.Lock()  # Lock cho driver
+        self.driver_lock = threading.Lock()
+        self.profile_path = None
         
     def _update_status(self, message, level="info"):
         if self.account_data:
@@ -1393,13 +1495,15 @@ class INSTAGRAM:
         try:
             if self.driver:
                 self.driver.quit()
+                if self.profile_path:
+                    cleanup_profile(self.username or "unknown")
         except:
             pass
         self.driver = None
         self.error_count = 0
         time.sleep(5)
         return self.init_driver()
-        
+    
     def _wait_for_rate_limit(self):
         current_time = time.time()
         time_since_last = current_time - self.last_action_time
@@ -1412,7 +1516,9 @@ class INSTAGRAM:
             try:
                 self._update_status("Khởi tạo driver...")
                 with self.driver_lock:
-                    self.driver = create_chrome_driver(self.account_data)
+                    self.driver = create_chrome_driver(self.account_data, self.username)
+                    if self.username:
+                        self.profile_path = get_profile_path(self.username)
                 self.driver.set_page_load_timeout(60)
                 self.driver.set_script_timeout(30)
                 self._update_status("Driver sẵn sàng")
@@ -1500,28 +1606,16 @@ class INSTAGRAM:
             if login_success:
                 self._update_status("Đăng nhập thành công!")
                 
-                try:
-                    for cookie in self.driver.get_cookies():
-                        if cookie['name'] == 'ds_user_id':
-                            self.user_id = cookie['value']
-                        if cookie['name'] == 'sessionid' and 'userid' in cookie.get('value', ''):
-                            parts = cookie['value'].split('%')
-                            if len(parts) > 0 and parts[0].isdigit():
-                                self.user_id = parts[0]
-                    
-                    self.driver.get("https://www.instagram.com/accounts/edit/")
-                    time.sleep(random.uniform(2, 4))
-                    
-                    username_inputs = self.driver.find_elements(By.CSS_SELECTOR, "input[name='username']")
-                    if username_inputs:
-                        self.username = username_inputs[0].get_attribute('value')
-                        self._update_status(f"Username: {self.username}")
-                except:
-                    pass
-                
                 if not self.username:
-                    self.username = "account_" + str(self.user_id)[-6:] if self.user_id else "unknown"
-                    self._update_status(f"Username: {self.username}")
+                    try:
+                        self.driver.get("https://www.instagram.com/accounts/edit/")
+                        time.sleep(random.uniform(2, 4))
+                        username_inputs = self.driver.find_elements(By.CSS_SELECTOR, "input[name='username']")
+                        if username_inputs:
+                            self.username = username_inputs[0].get_attribute('value')
+                            self._update_status(f"Username: {self.username}")
+                    except:
+                        pass
                 
                 return True
             else:
@@ -2004,14 +2098,16 @@ class INSTAGRAM:
             try:
                 with self.driver_lock:
                     self.driver.quit()
+                    if self.profile_path:
+                        cleanup_profile(self.username or "unknown")
             except:
                 pass
             self.driver = None
 
 
-# ========== CẤU HÌNH SELENIUM THEO MÔI TRƯỜNG ==========
-def create_chrome_driver(account_data=None):
-    """Tạo Chrome driver với cấu hình phù hợp theo môi trường"""
+# ========== CẤU HÌNH SELENIUM THEO MÔI TRƯỜNG (CÓ TÁCH PROFILE) ==========
+def create_chrome_driver(account_data=None, username=None):
+    """Tạo Chrome driver với cấu hình phù hợp theo môi trường và profile riêng cho từng account"""
     
     if account_data:
         update_account_status(account_data, "Kiểm tra trình duyệt...")
@@ -2035,6 +2131,13 @@ def create_chrome_driver(account_data=None):
     chrome_options.add_argument('--disable-extensions')
     chrome_options.add_argument('--lang=vi-VN')
     chrome_options.add_argument('--remote-debugging-port=9222')
+    
+    # TÁCH PROFILE RIÊNG CHO MỖI ACCOUNT
+    if username:
+        profile_path = get_profile_path(username)
+        chrome_options.add_argument(f'--user-data-dir={profile_path}')
+        if account_data:
+            update_account_status(account_data, f"Profile: {username[:10]}")
     
     chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
     chrome_options.add_experimental_option('useAutomationExtension', False)
@@ -2097,6 +2200,10 @@ def create_chrome_driver(account_data=None):
                     simple_options.add_argument('--disable-dev-shm-usage')
                     simple_options.add_argument('--single-process')
                     simple_options.add_argument(f'--user-agent={user_agent}')
+                    
+                    if username:
+                        profile_path = get_profile_path(username)
+                        simple_options.add_argument(f'--user-data-dir={profile_path}')
                     
                     if chrome_path:
                         simple_options.binary_location = chrome_path
@@ -2179,7 +2286,6 @@ def handle_follow_job(bot, data, account_id, account_data):
             
             if kiem_tra_rate_limit(error_msg):
                 increment_error(account_data, 'rate_limit')
-                # Rate limit 429 - tăng thời gian chờ lên
                 wait_time = random.randint(60, 120)
                 account_data["rate_limit_until"] = time.time() + wait_time
                 account_data["api_message"] = f" Rate limit 429, nghỉ {wait_time}s"
@@ -2246,7 +2352,6 @@ def handle_comment_job(bot, link, comment_text, account_id, account_data):
     if stop_threads:
         return {"status": False, "message": "Thread dừng"}
 
-    # FIX: Kiểm tra nội dung comment ngay từ đầu - nếu không có thì bỏ qua luôn
     if not comment_text or comment_text == '' or comment_text.strip() == '':
         error_msg = "Job comment không có nội dung - bỏ qua"
         update_account_status(account_data, error_msg, "warning")
@@ -2321,11 +2426,8 @@ def kiem_tra_checkpoint(error_msg):
     return False
 
 def kiem_tra_rate_limit(error_msg):
-    """Kiểm tra rate limit - đúng chuẩn 429"""
-    # Kiểm tra status code 429
     if "429" in str(error_msg):
         return True
-    # Kiểm tra message rate limit
     rate_messages = ['rate_limit', 'too many requests', 'please wait', 'rate limit', '429']
     if any(msg in str(error_msg).lower() for msg in rate_messages):
         return True
@@ -2334,17 +2436,14 @@ def kiem_tra_rate_limit(error_msg):
 
 # ========== Hàm gọi API Golike với lock để tránh đá nhau ==========
 def chonacc(headers):
-    """Lấy danh sách Instagram account từ Golike - CÓ LOCK"""
     url = 'https://gateway.golike.net/api/instagram-account'
     with api_lock:
         try:
             response = requests.get(url, headers=headers, timeout=15, verify=False)
-            
             try:
                 result = response.json()
             except:
                 result = {}
-            
             if response.status_code == 200:
                 if isinstance(result, dict) and (result.get('status') == 200 or result.get('success') == True):
                     return {"status": True, "data": result.get('data', [])}
@@ -2362,7 +2461,6 @@ def chonacc(headers):
             return {"status": False, "message": str(e)}
 
 def nhannv(account_id, headers):
-    """Nhận job từ Golike - CÓ LOCK"""
     params = {
         'instagram_account_id': account_id,
         'data': 'null'
@@ -2371,12 +2469,10 @@ def nhannv(account_id, headers):
     with api_lock:
         try:
             response = requests.get(url, headers=headers, params=params, timeout=20, verify=False)
-            
             try:
                 result = response.json()
             except:
                 result = {}
-            
             if response.status_code == 200:
                 if isinstance(result, dict) and (result.get('status') == 200 or result.get('success') == True):
                     return {"status": True, "data": result.get('data')}
@@ -2394,7 +2490,6 @@ def nhannv(account_id, headers):
             return {"status": False, "message": str(e)}
 
 def hoanthanh(ads_id, account_id, headers):
-    """Hoàn thành job - CÓ LOCK"""
     json_data = {
         'instagram_users_advertising_id': ads_id,
         'instagram_account_id': account_id,
@@ -2405,12 +2500,10 @@ def hoanthanh(ads_id, account_id, headers):
         try:
             response = requests.post('https://gateway.golike.net/api/advertising/publishers/instagram/complete-jobs',
                                      headers=headers, json=json_data, timeout=15, verify=False)
-            
             try:
                 result = response.json()
             except:
                 result = {}
-            
             if response.status_code == 200:
                 if isinstance(result, dict) and (result.get('status') == 200 or result.get('success') == True):
                     return {"status": True, "data": result.get('data'), "message": result.get('message', 'Success')}
@@ -2428,7 +2521,6 @@ def hoanthanh(ads_id, account_id, headers):
             return {"status": False, "message": str(e)}
 
 def baoloi(ads_id, object_id, account_id, loai, headers):
-    """Báo lỗi job - CÓ LOCK"""
     json_data1 = {
         'description': 'Đã làm Job này rồi',
         'users_advertising_id': ads_id,
@@ -2452,12 +2544,10 @@ def baoloi(ads_id, object_id, account_id, loai, headers):
         try:
             response = requests.post('https://gateway.golike.net/api/advertising/publishers/instagram/skip-jobs',
                                     headers=headers, json=json_data, timeout=8, verify=False)
-            
             try:
                 result = response.json()
             except:
                 result = {}
-            
             if response.status_code == 200:
                 if isinstance(result, dict) and (result.get('status') == 200 or result.get('success') == True):
                     return {"status": True, "message": result.get('message', 'Success')}
@@ -2485,7 +2575,7 @@ def banner():
       \033[38;2;150;230;255m  ░       ░░░ ░ ░ ░  ░  ░       ░      ░ ░ ░ ▒  ░ ░ ░ ▒    ░ ░
       \033[38;2;120;255;230m            ░           ░                  ░ ░      ░ ░      ░  ░
 \033[0m
-\033[38;2;255;200;140m[\033[38;2;245;245;245m</>\033[38;2;255;200;140m] \033[38;2;200;160;255mADMIN:\033[38;2;255;235;180m NHƯ ANH ĐÃ THẤY EM   \033[38;2;255;220;160mPhiên Bản: \033[38;2;120;255;220mv3.4
+\033[38;2;255;200;140m[\033[38;2;245;245;245m</>\033[38;2;255;200;140m] \033[38;2;200;160;255mADMIN:\033[38;2;255;235;180m NHƯ ANH ĐÃ THẤY EM   \033[38;2;255;220;160mPhiên Bản: \033[38;2;120;255;220mv3.5
 \033[38;2;255;200;140m[\033[38;2;245;245;245m</>\033[38;2;255;200;140m] \033[38;2;200;160;255mNhóm Telegram: \033[38;2;120;255;220mhttps://t.me/se_meo_bao_an
 \033[38;2;190;235;210m───────────────────────────────────────────────────────────────────────\033[0m
 """
@@ -2494,19 +2584,22 @@ def banner():
 
 # ========== HÀM XÂY DỰNG BẢNG DASHBOARD ==========
 def build_table():
-    table = Table(box=box.SQUARE, title="[bold cyan]DASHBOARD INSTAGRAM TOOL[/bold cyan]")
+    table = Table(
+        box=box.SQUARE,
+        show_lines=True,
+        title="[bold cyan]DASHBOARD INSTAGRAM TOOL v3.5[/bold cyan]"
+    )
 
     table.add_column("STT", justify="center", style="dim", width=4)
     table.add_column("Username", style="cyan", width=12)
     table.add_column("Nick Golike", style="yellow", width=12)
+    table.add_column("Proxy", style="magenta", width=6)
     table.add_column("Trạng thái", style="bold", justify="center", width=12)
     table.add_column("Đã làm", justify="center", style="green", width=6)
     table.add_column("Bỏ qua", justify="center", style="red", width=6)
-    table.add_column("Follow", justify="center", width=5)
-    table.add_column("Like", justify="center", width=5)
-    table.add_column("Comment", justify="center", width=6)
+    table.add_column("Type", justify="center", width=16)
     table.add_column("Coin", justify="center", style="yellow", width=5)
-    table.add_column("Chi tiết", style="magenta", width=25)
+    table.add_column("Message", style="magenta", width=25)
 
     for i, (acc_id, data) in enumerate(all_accounts_data.items(), 1):
         if not data.get("is_running", True):
@@ -2517,6 +2610,9 @@ def build_table():
             status_color = "red"
         elif "die" in data.get("status", "").lower():
             status = "DIE"
+            status_color = "red"
+        elif "proxy" in data.get("status", "").lower() and "lỗi" in data.get("status", "").lower():
+            status = "PROXY LỖI"
             status_color = "red"
         elif data.get("rate_limit_until", 0) > time.time():
             status = "RATE LIMIT"
@@ -2530,35 +2626,35 @@ def build_table():
         else:
             status = "ĐANG CHẠY"
             status_color = "green"
-        
+
         if data.get("api_message"):
             detail = data["api_message"]
         else:
             detail = data.get("detail_status", data.get("status", ""))
-        
+
         if len(detail) > 25:
             detail = detail[:22] + "..."
-            
+
         golike_name = data.get("golike_username", "-")[:10]
-            
+        proxy_status = "[dim]-[/]"
+        job_text = f"F:{data.get('follow',0)} L:{data.get('like',0)} C:{data.get('comment',0)}"
+
         table.add_row(
             str(i),
             data.get("username", "")[:10],
             golike_name,
+            proxy_status,
             f"[{status_color}]{status}[/{status_color}]",
             str(data.get("done", 0)),
             str(data.get("skip", 0)),
-            str(data.get("follow", 0)),
-            str(data.get("like", 0)),
-            str(data.get("comment", 0)),
+            job_text,
             str(data.get("coin", 0)),
             detail
         )
-
+        
     return table
 
 def countdown_delay(account_id, account_data, total_seconds, message="Đợi"):
-    """Hiển thị đếm ngược thời gian delay, đồng thời reset api_message"""
     global stop_threads
     
     if total_seconds > 10:
@@ -2612,7 +2708,6 @@ def run_account(account_id, account_data, headers, lam, delay_config, lannhan, d
     
     while not stop_threads and account_data.get("is_running", True):
         try:
-            # Kiểm tra rate limit
             if account_data.get("rate_limit_until", 0) > time.time():
                 remaining = int(account_data["rate_limit_until"] - time.time())
                 if remaining > 0:
@@ -2696,7 +2791,6 @@ def run_account(account_id, account_data, headers, lam, delay_config, lannhan, d
                 else:
                     comment_text = ''
                     
-                # FIX: Kiểm tra comment text trước khi xử lý
                 if not comment_text or comment_text.strip() == '':
                     update_account_status(account_data, "Job comment không có nội dung - bỏ qua", "warning")
                     account_data["api_message"] = " ⚠ Comment rỗng, bỏ qua"
@@ -2848,10 +2942,11 @@ def run_account(account_id, account_data, headers, lam, delay_config, lannhan, d
 
 # ========== Hàm khởi tạo và chạy tool ==========
 def start_tool():
-    """Hàm chính để khởi tạo và chạy tool"""
     global all_accounts_data, stop_threads, console, system_status
     
     console = Console()
+    
+    cleanup_all_profiles()
     
     if not check_and_install_selenium():
         print("\033[1;31mThiếu selenium. Tool không thể chạy!")
