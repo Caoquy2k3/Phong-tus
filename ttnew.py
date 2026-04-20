@@ -32,6 +32,7 @@ import urllib.request
 import signal
 import gc
 from collections import deque
+from math import sin, cos, pi
 
 # ==================== CẤU HÌNH MÚI GIỜ VIỆT NAM CHUẨN ====================
 os.environ['TZ'] = 'Asia/Ho_Chi_Minh'
@@ -90,7 +91,222 @@ def is_stop_all():
         return stop_all_threads
 
 
-# ==================== HÀM LẤY VERSION TIKTOK (KHÔNG CACHE GLOBAL) ====================
+# ==================== ANIMATION BORDER HIGHLIGHT ====================
+class BorderAnimator:
+    """
+    Quản lý hiệu ứng highlight chạy quanh viền box
+    Không dùng global, state riêng cho UI thread
+    """
+    
+    def __init__(self, width=80, height=20):
+        self.width = width
+        self.height = height
+        self.perimeter = 2 * width + 2 * height
+        self.pos = 0
+        self.frame_count = 0
+        self.speed = 1  # mỗi frame di chuyển 1 bước
+        self.tail_length = 2  # độ dài đuôi sáng (2-3 ký tự)
+        
+        # Màu sắc gradient theo frame
+        self.hue_offset = 0
+        
+    def update(self):
+        """Cập nhật vị trí highlight cho frame tiếp theo"""
+        self.pos = (self.pos + self.speed) % self.perimeter
+        self.frame_count += 1
+        self.hue_offset = (self.hue_offset + 5) % 360
+    
+    def get_position_info(self, perimeter_pos):
+        """
+        Xác định vị trí nằm trên cạnh nào
+        Trả về: (edge, edge_pos, total_width, total_height)
+        edge: 'top', 'right', 'bottom', 'left'
+        """
+        w, h = self.width, self.height
+        
+        if perimeter_pos < w:
+            return 'top', perimeter_pos, w, h
+        elif perimeter_pos < w + h:
+            return 'right', perimeter_pos - w, w, h
+        elif perimeter_pos < w + h + w:
+            return 'bottom', perimeter_pos - (w + h), w, h
+        else:
+            return 'left', perimeter_pos - (w + h + w), w, h
+    
+    def is_highlight_position(self, edge, edge_index):
+        """
+        Kiểm tra xem vị trí (edge, edge_index) có được highlight không
+        Hỗ trợ tail effect (2-3 ký tự sáng liên tiếp)
+        """
+        # Kiểm tra vị trí chính
+        current_edge, current_edge_pos, _, _ = self.get_position_info(self.pos)
+        
+        if current_edge == edge and current_edge_pos == edge_index:
+            return True
+        
+        # Kiểm tra tail (các vị trí phía sau)
+        for tail_offset in range(1, self.tail_length + 1):
+            tail_pos = (self.pos - tail_offset) % self.perimeter
+            tail_edge, tail_edge_pos, _, _ = self.get_position_info(tail_pos)
+            if tail_edge == edge and tail_edge_pos == edge_index:
+                return True
+        
+        return False
+    
+    def get_brightness_for_position(self, edge, edge_index):
+        """
+        Tính độ sáng cho vị trí (dùng cho gradient)
+        Trả về: 0-1 (1 là sáng nhất)
+        """
+        current_edge, current_edge_pos, _, _ = self.get_position_info(self.pos)
+        
+        if current_edge == edge and current_edge_pos == edge_index:
+            return 1.0
+        
+        for tail_offset in range(1, self.tail_length + 1):
+            tail_pos = (self.pos - tail_offset) % self.perimeter
+            tail_edge, tail_edge_pos, _, _ = self.get_position_info(tail_pos)
+            if tail_edge == edge and tail_edge_pos == edge_index:
+                # Đuôi sáng mờ dần
+                return 1.0 - (tail_offset / (self.tail_length + 1))
+        
+        return 0.0
+    
+    def get_highlight_char(self, edge_char, edge, edge_index):
+        """
+        Lấy ký tự highlight thay thế cho ký tự viền
+        """
+        brightness = self.get_brightness_for_position(edge, edge_index)
+        
+        if brightness <= 0:
+            return edge_char
+        
+        # Gradient màu dựa trên hue_offset
+        hue = (self.hue_offset + brightness * 60) % 360
+        
+        # Chọn ký tự highlight dựa trên loại viền
+        if edge_char in ['─', '╌', '┄']:
+            highlight_char = '━'
+        elif edge_char in ['│', '┆', '┊']:
+            highlight_char = '┃'
+        elif edge_char == '┌':
+            highlight_char = '┏'
+        elif edge_char == '┐':
+            highlight_char = '┓'
+        elif edge_char == '└':
+            highlight_char = '┗'
+        elif edge_char == '┘':
+            highlight_char = '┛'
+        elif edge_char == '├':
+            highlight_char = '┣'
+        elif edge_char == '┤':
+            highlight_char = '┫'
+        elif edge_char == '┬':
+            highlight_char = '┳'
+        elif edge_char == '┴':
+            highlight_char = '┻'
+        elif edge_char == '┼':
+            highlight_char = '╋'
+        else:
+            highlight_char = edge_char
+        
+        # Tạo màu gradient
+        if brightness >= 0.8:
+            color = f"#ff{int(100 + hue/3):02x}00"
+        elif brightness >= 0.5:
+            color = f"#ff{int(150 + hue/4):02x}00"
+        else:
+            color = f"#ff{int(200 + hue/5):02x}00"
+        
+        return f"[bold {color}]{highlight_char}[/]"
+    
+    def render_border_with_highlight(self, top_edge, bottom_edge, left_edge, right_edge, 
+                                      top_chars, bottom_chars, left_chars, right_chars):
+        """
+        Render viền với hiệu ứng highlight
+        """
+        result = []
+        
+        # Top edge
+        top_result = []
+        for i, ch in enumerate(top_chars):
+            if self.is_highlight_position('top', i):
+                top_result.append(self.get_highlight_char(ch, 'top', i))
+            else:
+                top_result.append(ch)
+        result.append(''.join(top_result))
+        
+        # Middle rows (left + right)
+        for i in range(len(left_chars)):
+            left_char = left_chars[i]
+            right_char = right_chars[i]
+            
+            left_highlighted = self.get_highlight_char(left_char, 'left', i) if self.is_highlight_position('left', i) else left_char
+            right_highlighted = self.get_highlight_char(right_char, 'right', i) if self.is_highlight_position('right', i) else right_char
+            
+            result.append(f"{left_highlighted}{' ' * (len(top_chars) - 2)}{right_highlighted}")
+        
+        # Bottom edge
+        bottom_result = []
+        for i, ch in enumerate(bottom_chars):
+            if self.is_highlight_position('bottom', i):
+                bottom_result.append(self.get_highlight_char(ch, 'bottom', i))
+            else:
+                bottom_result.append(ch)
+        result.append(''.join(bottom_result))
+        
+        return '\n'.join(result)
+
+
+# ==================== CUSTOM BOX VỚI ANIMATION ====================
+class AnimatedBox:
+    """Box có viền highlight chạy liên tục"""
+    
+    def __init__(self, border_animator):
+        self.animator = border_animator
+    
+    def render(self, content, title="", border_style="#ff9ecb"):
+        """
+        Render box với viền có animation
+        """
+        lines = content.split('\n')
+        height = len(lines)
+        width = max(len(line) for line in lines) if lines else 40
+        width = max(width + 4, 40)  # Padding + min width
+        
+        self.animator.width = width
+        self.animator.height = height + 2  # +2 cho viền trên dưới
+        
+        # Tạo các cạnh
+        top_chars = ['┌'] + ['─'] * (width - 2) + ['┐']
+        bottom_chars = ['└'] + ['─'] * (width - 2) + ['┘']
+        left_chars = ['│'] * height
+        right_chars = ['│'] * height
+        
+        # Thêm title vào top edge
+        if title:
+            title_display = f" {title} "
+            for i, ch in enumerate(title_display):
+                if 1 + i < len(top_chars) - 1:
+                    top_chars[1 + i] = ch
+        
+        # Render viền với highlight
+        bordered = self.animator.render_border_with_highlight(
+            top_chars, bottom_chars, left_chars, right_chars,
+            top_chars, bottom_chars, left_chars, right_chars
+        )
+        
+        # Chèn nội dung
+        result_lines = bordered.split('\n')
+        for i, line in enumerate(lines):
+            if i + 1 < len(result_lines):
+                padding = width - len(line) - 2
+                result_lines[i + 1] = result_lines[i + 1][0] + f" {line}{' ' * padding}" + result_lines[i + 1][-1]
+        
+        return '\n'.join(result_lines)
+
+
+# ==================== HÀM LẤY VERSION TIKTOK ====================
 def get_tiktok_version_from_device(device_obj, serial=None):
     """Lấy version TikTok - không dùng cache global"""
     try:
@@ -240,12 +456,14 @@ class TikTokBot:
         self._load_gui_template()
         
         # ===== MỖI BOT CÓ CACHE RIÊNG =====
-        self.version_cache = None  # Cache version riêng
+        self.version_cache = None
         self.version_cache_time = 0
         
-        # ĐÃ XÓA UI CACHE - KHÔNG DÙNG CACHE UI NỮA
+        # Cache cho UI dump riêng
+        self.ui_dump_cache = {"xml": "", "timestamp": 0, "nodes": []}
+        self.ui_dump_cache_ttl = 0.4
         self.last_dump_time = 0
-        self.min_dump_interval = 0.1  # Giảm xuống 0.1s
+        self.min_dump_interval = 0.15
 
         # File riêng cho từng device
         self.link_job_file = None
@@ -260,7 +478,7 @@ class TikTokBot:
         
         # Retry cho username
         self.username_retry_count = 0
-        self.max_username_retries = 5  # Tối đa 5 lần thử lấy username
+        self.max_username_retries = 5
         
         self.tiktok_version = None
 
@@ -277,7 +495,6 @@ class TikTokBot:
             except Exception as e:
                 console.print(f"Bot {self.serial[:8]}: Lỗi load gui.png: {str(e)}")
         
-        # Tải về nếu chưa có
         url = "https://raw.githubusercontent.com/Caoquy2k3/Phong-tus/refs/heads/main/gui.png"
         for attempt in range(3):
             try:
@@ -293,7 +510,6 @@ class TikTokBot:
         return False
 
     def ensure_device(self):
-        """Kiểm tra device còn hoạt động không"""
         try:
             if not self.device:
                 return False
@@ -351,7 +567,6 @@ class TikTokBot:
         time.sleep(1)
     
     def _get_tiktok_version(self):
-        """Lấy version TikTok - dùng cache riêng"""
         now = time.time()
         if self.version_cache and (now - self.version_cache_time) < 60:
             return self.version_cache
@@ -477,7 +692,6 @@ class TikTokBot:
         self._update_dashboard_status(msg, job_type)
     
     def _check_and_reconnect_adb(self):
-        """Kiểm tra kết nối ADB riêng cho device này"""
         now = time.time()
         if now - self.last_adb_check_time < 30:
             return True
@@ -510,13 +724,16 @@ class TikTokBot:
         return not self.stop_flag and not is_stop_all()
     
     def _dump_ui_nodes(self):
-        """Dump UI nodes TRỰC TIẾP - KHÔNG CACHE"""
         now = time.time()
         
-        # Đảm bảo không dump quá nhanh liên tục
         if now - self.last_dump_time < self.min_dump_interval:
-            time.sleep(self.min_dump_interval - (now - self.last_dump_time) + 0.05)
-        self.last_dump_time = time.time()
+            if self.ui_dump_cache["nodes"]:
+                return self.ui_dump_cache["nodes"]
+        self.last_dump_time = now
+        
+        if (self.ui_dump_cache["nodes"] and 
+            (now - self.ui_dump_cache["timestamp"]) < self.ui_dump_cache_ttl):
+            return self.ui_dump_cache["nodes"]
         
         try:
             xml_content = self.device.dump_hierarchy()
@@ -529,6 +746,10 @@ class TikTokBot:
                 attrs = dict(attr_pattern.findall(match.group(1)))
                 if attrs:
                     nodes.append(attrs)
+            
+            self.ui_dump_cache["xml"] = xml_content
+            self.ui_dump_cache["timestamp"] = now
+            self.ui_dump_cache["nodes"] = nodes
             
             return nodes
         except Exception:
@@ -1014,7 +1235,6 @@ class TikTokBot:
             self._add_response_message("Không tìm thấy ô nhập comment", "comment")
             return False
 
-        # Click nút Gửi bằng OpenCV với template riêng
         click_success = False
         
         if self.gui_template is not None:
@@ -1270,7 +1490,6 @@ class TikTokBot:
         return wait_tiktok_ui_smart(self.device, timeout=20)
     
     def _click_username_by_dump(self):
-        """Quét username từ XML sau khi đã vào profile"""
         try:
             deeplink_url = "tiktok://user/profile"
             self.device.shell(f'am start -a android.intent.action.VIEW -d "{deeplink_url}" {TIKTOK_PACKAGE}')
@@ -1309,10 +1528,6 @@ class TikTokBot:
             return None
     
     def _get_username_persistent_loop(self):
-        """
-        Lấy username với số lần thử giới hạn (max 5 lần)
-        Nếu quá số lần, báo lỗi và thoát
-        """
         self.username_retry_count = 0
         
         while self.username_retry_count < self.max_username_retries and not self.stop_flag and not is_stop_all():
@@ -1340,25 +1555,22 @@ class TikTokBot:
                 username = self._click_username_by_dump()
                 if username and len(username) > 2:
                     self._add_response_message(f"Đã lấy username: @{username}")
-                    self.username_retry_count = 0  # Reset thành công
+                    self.username_retry_count = 0
                     return username
                 self._add_response_message("Không tìm thấy tên trên màn hình...")
             else:
                 self._add_response_message(f"Quá {wait_time + 20}s máy không load nổi UI. Buộc dừng!")
 
-            # Nếu chưa hết số lần thử, force stop và thử lại
             if self.username_retry_count < self.max_username_retries:
                 self._force_stop_tiktok()
                 time.sleep(2)
         
-        # Đã thử quá số lần
         self._add_response_message(f"Không thể lấy username sau {self.max_username_retries} lần thử. Bỏ qua thiết bị này!")
         return None
     
     # ==================== HÀM ADD TÀI KHOẢN ====================
     
     def verify_account_logic_new(self, username):
-        """Logic xác thực tài khoản"""
         url = "https://gateway.golike.net/api/tiktok-account/verify-account-id"
         username = username.replace('@', '').strip()
         payload = {"unique_id": username}
@@ -1390,7 +1602,6 @@ class TikTokBot:
             return False, f"Lỗi: {str(e)}", None, None
     
     def auto_setup_account(self):
-        """Quy trình: Quét Username -> Add Acc -> Trả về ID và username"""
         auto_username = self._get_username_persistent_loop()
         if not auto_username:
             return None, None
@@ -1527,7 +1738,7 @@ class TikTokBot:
         num_videos_khoi_dong = self.delay_config.get('nuoi_nick', 2)
         share_rate = self.delay_config.get('share_rate', 15)
         if num_videos_khoi_dong > 0:
-            self._add_response_message("Đang nuôi nick ...")
+            self._add_response_message("Đang nuôi nick khởi động...")
             self.nuoi_nick_short(num_videos=num_videos_khoi_dong, share_rate=share_rate)
         
         self._reset_retry_counter()
@@ -1643,7 +1854,7 @@ def banner():
       \033[38;2;120;255;230m            ░           ░                  ░ ░      ░ ░      ░  ░
 \033[0m
 
-\033[38;2;255;200;140m[</>] \033[38;2;200;160;255mADMIN: NHƯ ANH ĐÃ THẤY EM   \033[38;2;255;220;160mPhiên Bản: \033[38;2;120;255;220mv3.15-fix-no-ui-cache
+\033[38;2;255;200;140m[</>] \033[38;2;200;160;255mADMIN: NHƯ ANH ĐÃ THẤY EM   \033[38;2;255;220;160mPhiên Bản: \033[38;2;120;255;220mv3.16
 \033[38;2;255;200;140m[</>] \033[38;2;200;160;255mNhóm Telegram: \033[38;2;120;255;220mhttps://t.me/se_meo_bao_an
 \033[38;2;190;235;210m───────────────────────────────────────────────────────────────────────\033[0m
 """
@@ -2239,8 +2450,15 @@ def display_auth_menu():
         return display_auth_menu()
 
 
-def build_dashboard_table():
-    table = Table(show_header=True, header_style="#ffffff", border_style="#ff9ecb", box=box.ROUNDED, show_lines=True)
+def build_dashboard_table(animator=None):
+    """Xây dựng bảng dashboard với viền có animation"""
+    table = Table(
+        show_header=True, 
+        header_style="#ffffff", 
+        border_style="#ff9ecb", 
+        box=box.ROUNDED, 
+        show_lines=True
+    )
     
     table.add_column("STT", justify="center", style="#ffd54f", width=4)
     table.add_column("Device", style="#a78bfa", width=20)
@@ -2288,7 +2506,8 @@ def build_dashboard_table():
     return table
 
 
-def make_dashboard_layout():
+def make_dashboard_layout(animator):
+    """Tạo layout dashboard với viền có animation"""
     order = ["xu", "dev", "act", "rate", "avg", "done", "fail", "err"]
     chieu_cao_stats = 4
     align_stats = "left"
@@ -2339,31 +2558,77 @@ def make_dashboard_layout():
     stats_grid.add_row(*[panels[k] for k in order if k in panels])
 
     layout["stats"].update(Align(stats_grid, align=align_stats))
-    layout["table"].update(build_dashboard_table())
+    
+    # Table với viền animation
+    table = build_dashboard_table(animator)
+    layout["table"].update(table)
     layout["gap_bottom"].update("")
 
     return layout
 
 
 def run_dashboard():
+    """Chạy dashboard với hiệu ứng viền highlight chạy liên tục"""
+
     if hasattr(os, 'nice'):
-        try: os.nice(10)
-        except: pass
-    
+        try:
+            os.nice(10)
+        except:
+            pass
+
+    animator = BorderAnimator(width=80, height=20)
+    frame_rate = 20
+    frame_duration = 1.0 / frame_rate
+
+    layout = make_dashboard_layout(animator)
+
+    # 🔥 lưu kích thước ban đầu
+    last_size = console.size
+
     with Live(
-        make_dashboard_layout(),
-        refresh_per_second=1.0, 
-        screen=False,
-        auto_refresh=True
+        layout,
+        refresh_per_second=frame_rate,
+        screen=True,
+        auto_refresh=False,
+        transient=False
     ) as live:
+
+        last_frame_time = time.time()
+
         while not is_stop_all():
             try:
-                layout = make_dashboard_layout()
-                if layout is not None:
+                # 🔥 FIX: detect resize (bật/tắt bàn phím)
+                current_size = console.size
+                if current_size != last_size:
+                    layout = make_dashboard_layout(animator)
                     live.update(layout)
-                time.sleep(1)
+                    last_size = current_size
+
+                current_time = time.time()
+                delta = current_time - last_frame_time
+
+                if delta >= frame_duration:
+                    animator.update()
+
+                    new_layout = make_dashboard_layout(animator)
+
+                    if new_layout is not None:
+                        for child in layout.children:
+                            try:
+                                layout[child.name].update(
+                                    new_layout[child.name].renderable
+                                )
+                            except:
+                                pass
+
+                    live.refresh()
+                    last_frame_time = current_time
+
+                else:
+                    time.sleep(0.001)
+
             except Exception:
-                time.sleep(1)
+                time.sleep(0.05)
 
 
 # ==================== MAIN ====================
