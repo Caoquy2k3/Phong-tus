@@ -1013,14 +1013,14 @@ class TikTokBot:
         except Exception:
             return False
     
-    # ========== COMMENT (ĐÃ SỬA - BỎ CHECK TRÙNG, LẤY NỘI DUNG TỪ JOB) ==========
+    # ========== COMMENT (ĐÃ CẬP NHẬT - OPENCV TÌM NÚT GỬI) ==========
     
     def do_comment(self, text, link):
         """
         Thực hiện comment với nội dung từ job
-        - Bỏ check trùng comment
-        - Bỏ filter nội dung
-        - Chỉ dùng text gốc từ job
+        - Mở comment section
+        - Nhập nội dung
+        - Dùng OpenCV tìm nút Gửi, fallback Enter nếu thất bại
         """
         if not self.device:
             return False
@@ -1028,61 +1028,72 @@ class TikTokBot:
         if self.stop_flag or is_stop_all():
             return False
         
-        # Chỉ kiểm tra nội dung có hay không, không filter
+        # Kiểm tra nội dung comment
         if not text or len(text.strip()) < 1:
-            # Nếu không có nội dung, vẫn thử mở comment section và gửi gì đó?
-            # Nhưng thường job comment luôn có nội dung
             self._add_response_message(u"Không có nội dung comment", "comment")
             return False
         
         comment_text = text.strip()
+        self._add_response_message(u"Đang mở comment...", "comment")
 
-        # Mở comment section
+        # 1. Mở khung comment
         comment_opened = False
         for attempt in range(4):
             if self.stop_flag or is_stop_all():
                 return False
-            wait_ui_stable_after_action(self.device, timeout=1)
             
+            wait_ui_stable_after_action(self.device, timeout=0.5)
+            
+            # Thử tìm nút comment bằng description
             comment_btn = self.device(descriptionContains="comment")
             if not comment_btn.exists:
                 comment_btn = self.device(descriptionContains="bình luận")
+            if not comment_btn.exists:
+                comment_btn = self.device(descriptionContains="Comment")
                 
             if comment_btn.exists:
                 comment_btn.click()
-                wait_ui_stable_after_action(self.device, timeout=1.5)
+                wait_ui_stable_after_action(self.device, timeout=2)
                 comment_opened = True
+                self._add_response_message(u"Đã mở comment section", "comment")
                 break
             
             time.sleep(1.5)
-            
+        
         if not comment_opened:
-            self._add_response_message(u"Không mở được comment", "comment")
+            self._add_response_message(u"Không mở được comment section", "comment")
             return False
 
+        # 2. Nhập nội dung
         wait_ui_stable_after_action(self.device, timeout=1)
         
-        # Tìm ô nhập comment
         input_box = self.device(className="android.widget.EditText")
         if not input_box.exists:
-            self._add_response_message(u"Không tìm thấy ô nhập", "comment")
+            # Thử tìm bằng resource-id
+            input_box = self.device(resourceIdMatches=".*input.*")
+        
+        if input_box.exists:
+            input_box.click()
+            wait_ui_stable_after_action(self.device, timeout=0.5)
+            
+            try:
+                input_box.clear_text()
+            except:
+                pass
+            
+            # Sử dụng clipboard để paste nội dung (tránh lỗi set_text với tiếng Việt)
+            self.device.clipboard.set(comment_text)
+            self.device.press("paste")
+            wait_ui_stable_after_action(self.device, timeout=1)
+            self._add_response_message(u"Đã nhập nội dung: {}".format(comment_text[:30]), "comment")
+        else:
+            self._add_response_message(u"Không tìm thấy ô nhập comment", "comment")
             return False
 
-        input_box.click()
-        wait_ui_stable_after_action(self.device, timeout=0.5)
-        
-        try:
-            input_box.clear_text()
-        except:
-            pass
-            
-        # Paste nội dung
-        self.device.clipboard.set(comment_text)
-        self.device.press("paste")
-        wait_ui_stable_after_action(self.device, timeout=1)
-
-        # Gửi comment
+        # 3. Click nút Gửi bằng OpenCV
         template = get_gui_template()
+        click_success = False
+        
         if template is not None:
             try:
                 screenshot = self.device.screenshot(format="opencv")
@@ -1096,23 +1107,27 @@ class TikTokBot:
                         x = max_loc[0] + w // 2
                         y = max_loc[1] + h // 2
                         self.device.click(x, y)
-                        self._add_response_message(u"Đã click nút Gửi (OpenCV)", "comment")
+                        click_success = True
+                        self._add_response_message(u"Đã click nút Gửi (OpenCV, độ khớp: {:.2f})".format(max_val), "comment")
                     else:
-                        self.device.press("enter")
-                        self._add_response_message(u"Độ khớp thấp, dùng Enter", "comment")
-                else:
-                    self.device.press("enter")
-            except Exception:
-                self.device.press("enter")
+                        self._add_response_message(u"Độ khớp OpenCV thấp ({:.2f}), dùng Enter".format(max_val), "comment")
+            except Exception as e:
+                self._add_response_message(u"Lỗi OpenCV: {}, dùng Enter".format(str(e)[:30]), "comment")
         else:
+            self._add_response_message(u"Không có template gui.png, dùng Enter", "comment")
+        
+        # Fallback: Dùng phím Enter nếu OpenCV thất bại
+        if not click_success:
             self.device.press("enter")
+            self._add_response_message(u"Đã nhấn Enter để gửi comment", "comment")
 
         if self.stop_flag or is_stop_all():
             return False
         
-        # Lưu link đã làm để tránh làm lại job cũ (giữ nguyên logic này)
+        # Lưu link đã làm để tránh làm lại job cũ
         self.previous_job_link = link
         
+        wait_ui_stable_after_action(self.device, timeout=1)
         self._add_response_message(u"Comment thành công", "comment")
         return True
     
@@ -1690,7 +1705,7 @@ def banner():
       \033[38;2;120;255;230m            ░           ░                  ░ ░      ░ ░      ░  ░
 \033[0m
 
-\033[38;2;255;200;140m[</>] \033[38;2;200;160;255mADMIN: NHƯ ANH ĐÃ THẤY EM   \033[38;2;255;220;160mPhiên Bản: \033[38;2;120;255;220mv5.0-STATE-POLLING
+\033[38;2;255;200;140m[</>] \033[38;2;200;160;255mADMIN: NHƯ ANH ĐÃ THẤY EM   \033[38;2;255;220;160mPhiên Bản: \033[38;2;120;255;220mv3.13
 \033[38;2;255;200;140m[</>] \033[38;2;200;160;255mNhóm Telegram: \033[38;2;120;255;220mhttps://t.me/se_meo_bao_an
 \033[38;2;190;235;210m───────────────────────────────────────────────────────────────────────\033[0m
 """
@@ -2287,7 +2302,7 @@ def build_dashboard_table():
     table.add_column("Type", style="#38bdf8", width=8)
     table.add_column(u"Xu", style="#ff9ecb", width=5)
     table.add_column(u"Tổng", style="#facc15", width=6)
-    table.add_column("Done", style="#00ff9c", width=5)
+    table.add_column("Done", style="#00ff9c", width=7)
     table.add_column("Status", style="#ffffff", width=60)
     
     with dashboard_lock:
@@ -2350,7 +2365,7 @@ def make_dashboard_layout():
     )
     
     layout["title"].update(
-        Align.center("[bold #ffffff]TOOL GOLIKE TIKTOK [#00ff9c]BY PHONG TUS - v5.0 STATE POLLING[/]")
+        Align.center("[bold #ffffff]TOOL GOLIKE TIKTOK [#00ff9c]BY PHONG TUS[/]")
     )
     
     with dashboard_lock:
