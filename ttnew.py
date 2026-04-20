@@ -63,6 +63,7 @@ DEFAULT_DELAY_CONFIG = {
     'favorite': [5, 5],
     'job': [5, 5],
     'delay_done': 9,
+    'delay_open': 10,  # Thêm: Mặc định chờ 10s sau khi mở TikTok
     'loc_follow': 0,
     'nuoi_nick': 2,
     'share_rate': 15
@@ -1401,8 +1402,23 @@ class TikTokBot:
             
             self.device.app_start(TIKTOK_PACKAGE)
             
-            # Sử dụng state polling để chờ UI
-            ui_ready = wait_tiktok_ui_smart(self.device, timeout=60)
+            # Lấy giá trị delay_open từ cấu hình (mặc định 10s)
+            wait_time = self.delay_config.get('delay_open', 10)
+            self._update_dashboard_status(u"Đợi {}s cho TikTok load xong...".format(wait_time))
+            
+            # Ép máy chờ thực tế để vượt qua Splash Screen
+            # Chia nhỏ thời gian chờ để có thể kiểm tra stop_flag
+            elapsed = 0
+            while elapsed < wait_time and not self.stop_flag and not is_stop_all():
+                sleep_step = min(0.5, wait_time - elapsed)
+                time.sleep(sleep_step)
+                elapsed += sleep_step
+            
+            if self.stop_flag or is_stop_all():
+                return None
+            
+            # Sử dụng state polling để chờ UI (fallback)
+            ui_ready = wait_tiktok_ui_smart(self.device, timeout=20)
 
             if ui_ready:
                 self._update_dashboard_status(u" UI đã xong, đang lấy Username...")
@@ -1412,7 +1428,7 @@ class TikTokBot:
                     return username
                 self._add_response_message(u"Không tìm thấy tên trên màn hình...")
             else:
-                self._add_response_message(u" Quá 60s máy không load nổi UI. Buộc dừng!")
+                self._add_response_message(u" Quá {}s máy không load nổi UI. Buộc dừng!".format(wait_time + 20))
 
             # Chỉ force stop khi thực sự timeout
             self._force_stop_tiktok()
@@ -1708,7 +1724,7 @@ def banner():
       \033[38;2;120;255;230m            ░           ░                  ░ ░      ░ ░      ░  ░
 \033[0m
 
-\033[38;2;255;200;140m[</>] \033[38;2;200;160;255mADMIN: NHƯ ANH ĐÃ THẤY EM   \033[38;2;255;220;160mPhiên Bản: \033[38;2;120;255;220mv3.13
+\033[38;2;255;200;140m[</>] \033[38;2;200;160;255mADMIN: NHƯ ANH ĐÃ THẤY EM   \033[38;2;255;220;160mPhiên Bản: \033[38;2;120;255;220mv3.14
 \033[38;2;255;200;140m[</>] \033[38;2;200;160;255mNhóm Telegram: \033[38;2;120;255;220mhttps://t.me/se_meo_bao_an
 \033[38;2;190;235;210m───────────────────────────────────────────────────────────────────────\033[0m
 """
@@ -1761,6 +1777,7 @@ def setup_delay_config():
     share_rate = delay_config.get('share_rate', 15)
     loc_follow = delay_config.get('loc_follow', 0)
     delay_done = delay_config.get('delay_done', 9)
+    delay_open = delay_config.get('delay_open', 10)  # Thêm biến delay_open
     force_stop_enabled = saved_config.get('force_stop_enabled', False) if saved_config else False
     force_stop_after = saved_config.get('force_stop_after', 0) if saved_config else 0
     
@@ -1815,6 +1832,13 @@ def setup_delay_config():
             u"[#ffd54f]Delay Hoàn Thành[/]",
             u"[bold #ffffff]{}[/]".format(delay_done),
             u"[#00ffff]s[/]"
+        )
+        
+        # Thêm dòng Delay Mở TikTok vào bảng
+        table.add_row(
+            u"[#00ff9c]Delay Mở TikTok[/]",
+            u"[bold #ffffff]{}[/]".format(delay_open),
+            u"[#00ffff]giây[/]"
         )
 
         table.add_row(
@@ -1873,6 +1897,7 @@ def setup_delay_config():
         share_rate = input_number(u"Tỷ lệ Copy Link (0-100%) ({}): ".format(share_rate), share_rate)
         loc_follow = input_number(u"Lọc Follow (0 = OFF) ({}): ".format(loc_follow), loc_follow)
         delay_done = input_number(u"Delay Hoàn Thành ({}): ".format(delay_done), delay_done)
+        delay_open = input_number(u"Delay sau khi mở TikTok ({}): ".format(delay_open), delay_open)  # Thêm input delay_open
 
         force_stop_input = input(u"Buộc dừng chạy (y/n): ").strip().lower()
         force_stop_enabled = (force_stop_input == "y")
@@ -1886,6 +1911,7 @@ def setup_delay_config():
         'favorite': delay_fav,
         'job': delay_job,
         'delay_done': delay_done,
+        'delay_open': delay_open,  # Thêm delay_open vào config
         'loc_follow': loc_follow,
         'nuoi_nick': nuoi_nick,
         'share_rate': share_rate
