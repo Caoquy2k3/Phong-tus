@@ -243,11 +243,9 @@ class TikTokBot:
         self.version_cache = None  # Cache version riêng
         self.version_cache_time = 0
         
-        # Cache cho UI dump riêng
-        self.ui_dump_cache = {"xml": "", "timestamp": 0, "nodes": []}
-        self.ui_dump_cache_ttl = 0.4
+        # ĐÃ XÓA UI CACHE - KHÔNG DÙNG CACHE UI NỮA
         self.last_dump_time = 0
-        self.min_dump_interval = 0.15
+        self.min_dump_interval = 0.1  # Giảm xuống 0.1s
 
         # File riêng cho từng device
         self.link_job_file = None
@@ -512,17 +510,13 @@ class TikTokBot:
         return not self.stop_flag and not is_stop_all()
     
     def _dump_ui_nodes(self):
-        """Dump UI nodes - cache riêng cho từng bot"""
+        """Dump UI nodes TRỰC TIẾP - KHÔNG CACHE"""
         now = time.time()
         
+        # Đảm bảo không dump quá nhanh liên tục
         if now - self.last_dump_time < self.min_dump_interval:
-            if self.ui_dump_cache["nodes"]:
-                return self.ui_dump_cache["nodes"]
-        self.last_dump_time = now
-        
-        if (self.ui_dump_cache["nodes"] and 
-            (now - self.ui_dump_cache["timestamp"]) < self.ui_dump_cache_ttl):
-            return self.ui_dump_cache["nodes"]
+            time.sleep(self.min_dump_interval - (now - self.last_dump_time) + 0.05)
+        self.last_dump_time = time.time()
         
         try:
             xml_content = self.device.dump_hierarchy()
@@ -535,10 +529,6 @@ class TikTokBot:
                 attrs = dict(attr_pattern.findall(match.group(1)))
                 if attrs:
                     nodes.append(attrs)
-            
-            self.ui_dump_cache["xml"] = xml_content
-            self.ui_dump_cache["timestamp"] = now
-            self.ui_dump_cache["nodes"] = nodes
             
             return nodes
         except Exception:
@@ -1653,7 +1643,7 @@ def banner():
       \033[38;2;120;255;230m            ░           ░                  ░ ░      ░ ░      ░  ░
 \033[0m
 
-\033[38;2;255;200;140m[</>] \033[38;2;200;160;255mADMIN: NHƯ ANH ĐÃ THẤY EM   \033[38;2;255;220;160mPhiên Bản: \033[38;2;120;255;220mv3.15
+\033[38;2;255;200;140m[</>] \033[38;2;200;160;255mADMIN: NHƯ ANH ĐÃ THẤY EM   \033[38;2;255;220;160mPhiên Bản: \033[38;2;120;255;220mv3.15-fix-no-ui-cache
 \033[38;2;255;200;140m[</>] \033[38;2;200;160;255mNhóm Telegram: \033[38;2;120;255;220mhttps://t.me/se_meo_bao_an
 \033[38;2;190;235;210m───────────────────────────────────────────────────────────────────────\033[0m
 """
