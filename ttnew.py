@@ -198,150 +198,39 @@ def get_all_devices_versions(devices_list):
             versions[getattr(device, 'serial', str(device))] = "Unknown"
     return versions
 
-# ==================== CHỜ UI THÔNG MINH NÂNG CẤP (GIỮ NGUYÊN HÀM CŨ) ====================
-
-# Các activity TikTok cần chờ (load xong mới thao tác)
-TIKTOK_READY_ACTIVITIES = [
-    "com.ss.android.ugc.aweme.main.MainActivity",
-    "com.ss.android.ugc.aweme.splash.SplashActivity",
-    ".main.MainActivity",
-    "aweme.main.MainActivity",
-]
-
-def get_current_activity(device):
-    """Lấy activity hiện tại của TikTok"""
-    try:
-        current = device.app_current()
-        return current.get("activity", "")
-    except:
-        return ""
-
-def is_ui_stable(device, sample_count=3, sample_interval=0.15):
-    """
-    Kiểm tra UI đã ổn định chưa (không còn chuyển activity liên tục)
-    Dùng sampling để phát hiện activity đang thay đổi
-    """
-    try:
-        activities = []
-        for _ in range(sample_count):
-            act = get_current_activity(device)
-            if act:
-                activities.append(act)
-            time.sleep(sample_interval)
-        
-        # Nếu tất cả activity giống nhau -> UI ổn định
-        return len(set(activities)) == 1 and all(activities)
-    except:
-        return True
-
-def is_valid_activity(activity):
-    """Kiểm tra activity có phải là activity TikTok đã load xong không"""
-    if not activity:
-        return False
-    # Bỏ qua splash, loading, login
-    skip_keywords = ["splash", "loading", "login", "auth", "permission"]
-    for kw in skip_keywords:
-        if kw in activity.lower():
-            return False
-    return True
-
-def wait_tiktok_ui_smart_v2(device, timeout=40, require_stable=True):
-    """
-    Chờ TikTok load xong (check package + activity + UI stable)
-    KHÔNG PHÁ VỠ code cũ - chỉ nâng cấp
-    
-    Args:
-        device: device object
-        timeout: thời gian chờ tối đa (giây)
-        require_stable: có cần kiểm tra UI ổn định không
-    
-    Returns:
-        bool: True nếu UI đã sẵn sàng
-    """
-    start_time = time.time()
-    interval = 0.2  # Polling nhanh 0.2s
-    
-    last_activity = None
-    stable_count = 0
-    required_stable_checks = 2  # Cần 2 lần liên tiếp ổn định
-    
-    while time.time() - start_time < timeout:
-        try:
-            current = device.app_current()
-            current_pkg = current.get("package", "")
-            current_activity = current.get("activity", "")
-            
-            # Bước 1: Check package
-            if current_pkg != TIKTOK_PACKAGE:
-                time.sleep(interval)
-                continue
-            
-            # Bước 2: Check activity hợp lệ
-            if not current_activity or not is_valid_activity(current_activity):
-                time.sleep(interval)
-                continue
-            
-            # Bước 3: Kiểm tra UI ổn định (nếu cần)
-            if require_stable:
-                if current_activity == last_activity:
-                    stable_count += 1
-                else:
-                    stable_count = 0
-                    last_activity = current_activity
-                
-                if stable_count >= required_stable_checks:
-                    return True
-            else:
-                # Chỉ cần package + activity đúng
-                return True
-                
-        except Exception:
-            pass
-        
-        time.sleep(interval)
-    
-    # Fallback: kiểm tra package 1 lần cuối
-    try:
-        return device.app_current().get("package") == TIKTOK_PACKAGE
-    except:
-        return False
-
-# HÀM CŨ GIỮ NGUYÊN ĐỂ TƯƠNG THÍCH NGƯỢC
+# ==================== HÀM CHỜ UI THÔNG MINH (STATE POLLING - KHÔNG XML) ====================
 def wait_tiktok_ui_smart(device, timeout=40):
-    """Hàm cũ giữ nguyên, gọi phiên bản mới với require_stable=False"""
-    return wait_tiktok_ui_smart_v2(device, timeout=timeout, require_stable=False)
-
-def wait_tiktok_ui(device, timeout=20):
-    """Hàm cũ để tương thích, gọi hàm mới"""
-    return wait_tiktok_ui_smart_v2(device, timeout=timeout, require_stable=False)
-
-def wait_ui_stable_after_action(device, timeout=3):
     """
-    Chờ UI ổn định sau một hành động (click, swipe...)
-    Chỉ dùng state polling, không dump XML
+    Chờ UI TikTok load xong dựa trên state polling (app_current)
+    Chỉ kiểm tra package == TikTok, không dump XML
+    Interval ~0.25s
     """
     start_time = time.time()
-    interval = 0.25
-    
-    # Đợi một chút cho animation
-    time.sleep(0.3)
+    interval = 0.25  # ~0.2-0.3s
     
     while time.time() - start_time < timeout:
         try:
             current = device.app_current()
             if current.get("package") == TIKTOK_PACKAGE:
-                # Kiểm tra thêm activity ổn định
-                if is_ui_stable(device, sample_count=2, sample_interval=0.1):
-                    return True
-        except:
+                return True
+        except Exception:
             pass
         time.sleep(interval)
     
-    return True
+    return False
 
 def wait_element_exists(device, selector_func, timeout=30, check_interval=0.25):
     """
     Chờ một element xuất hiện trên giao diện
+    
+    Args:
+        device: device object
+        selector_func: function trả về selector hoặc bool
+        timeout: thời gian chờ tối đa
+        check_interval: khoảng thời gian giữa các lần kiểm tra
+    
+    Returns:
+        bool: True nếu element xuất hiện
     """
     start_time = time.time()
     while time.time() - start_time < timeout:
@@ -358,16 +247,42 @@ def wait_element_exists(device, selector_func, timeout=30, check_interval=0.25):
         time.sleep(check_interval)
     return False
 
+def wait_ui_stable_after_action(device, timeout=3):
+    """
+    Chờ UI ổn định sau một hành động (click, swipe...)
+    Chỉ dùng state polling, không dump XML
+    """
+    start_time = time.time()
+    interval = 0.25
+    
+    # Đợi một chút cho animation
+    time.sleep(0.3)
+    
+    while time.time() - start_time < timeout:
+        try:
+            current = device.app_current()
+            if current.get("package") == TIKTOK_PACKAGE:
+                return True
+        except:
+            pass
+        time.sleep(interval)
+    
+    return True  # Trả về True dù timeout để không block quá lâu
+
+# ==================== HÀM WAIT UI CŨ (GIỮ LẠI ĐỂ TƯƠNG THÍCH NGƯỢC) ====================
+def wait_tiktok_ui(device, timeout=20):
+    """Hàm cũ để tương thích, gọi hàm mới"""
+    return wait_tiktok_ui_smart(device, timeout=timeout)
+
 def force_restart_tiktok(device):
     """Buộc dừng và khởi động lại TikTok"""
     try:
         device.app_stop(TIKTOK_PACKAGE)
         time.sleep(1)
         device.app_start(TIKTOK_PACKAGE)
-        wait_tiktok_ui_smart_v2(device, timeout=15, require_stable=True)
+        wait_tiktok_ui_smart(device, timeout=15)
     except Exception as e:
         pass
-
 
 class TikTokBot:
 
@@ -635,7 +550,7 @@ class TikTokBot:
             self.device.info
             try:
                 self.device.app_start(TIKTOK_PACKAGE)
-                wait_tiktok_ui_smart_v2(self.device, timeout=10, require_stable=False)
+                wait_tiktok_ui_smart(self.device, timeout=10)
             except:
                 pass
             return True
@@ -646,6 +561,7 @@ class TikTokBot:
         if self.stop_flag or is_stop_all():
             return False
         
+        # Sử dụng cơ chế chờ thông minh thay vì sleep cố định
         wait_ui_stable_after_action(self.device, timeout=wait_time)
         return not self.stop_flag and not is_stop_all()
     
@@ -700,7 +616,7 @@ class TikTokBot:
             self.device.app_stop(TIKTOK_PACKAGE)
             time.sleep(0.8)
             self.device.app_start(TIKTOK_PACKAGE)
-            wait_tiktok_ui_smart_v2(self.device, timeout=10, require_stable=True)
+            wait_tiktok_ui_smart(self.device, timeout=10)
         except Exception:
             pass
     
@@ -709,7 +625,7 @@ class TikTokBot:
             current = self.device.app_current()
             if current.get("package") != TIKTOK_PACKAGE:
                 self.device.app_start(TIKTOK_PACKAGE)
-                wait_tiktok_ui_smart_v2(self.device, timeout=10, require_stable=True)
+                wait_tiktok_ui_smart(self.device, timeout=10)
                 return False
             return True
         except Exception:
@@ -722,14 +638,14 @@ class TikTokBot:
                 return False
             cmd = u'am start -a android.intent.action.VIEW -d "{}" {}'.format(link, TIKTOK_PACKAGE)
             self.device.shell(cmd)
-            launched = wait_tiktok_ui_smart_v2(self.device, timeout=8, require_stable=True)
+            launched = wait_tiktok_ui_smart(self.device, timeout=8)
             return launched
         except Exception:
             if self._check_and_reconnect_adb():
                 try:
                     cmd = u'am start -a android.intent.action.VIEW -d "{}" {}'.format(link, TIKTOK_PACKAGE)
                     self.device.shell(cmd)
-                    return wait_tiktok_ui_smart_v2(self.device, timeout=8, require_stable=True)
+                    return wait_tiktok_ui_smart(self.device, timeout=8)
                 except:
                     pass
             return False
@@ -1097,7 +1013,7 @@ class TikTokBot:
         except Exception:
             return False
     
-    # ========== COMMENT ==========
+    # ========== COMMENT (ĐÃ CẬP NHẬT - OPENCV TÌM NÚT GỬI) ==========
     
     def do_comment(self, text, link):
         """
@@ -1432,7 +1348,7 @@ class TikTokBot:
         
         self.device.app_start(TIKTOK_PACKAGE)
         
-        return wait_tiktok_ui_smart_v2(self.device, timeout=20, require_stable=True)
+        return wait_tiktok_ui_smart(self.device, timeout=20)
     
     def _click_username_by_dump(self):
         """Hàm quét username từ XML sau khi đã vào profile"""
@@ -1441,7 +1357,7 @@ class TikTokBot:
             self.device.shell(f'am start -a android.intent.action.VIEW -d "{deeplink_url}" {TIKTOK_PACKAGE}')
             
             # Chờ UI load
-            if not wait_tiktok_ui_smart_v2(self.device, timeout=8, require_stable=True):
+            if not wait_tiktok_ui_smart(self.device, timeout=8):
                 return None
 
             start_scan = time.time()
@@ -1486,7 +1402,7 @@ class TikTokBot:
             self.device.app_start(TIKTOK_PACKAGE)
             
             # Sử dụng state polling để chờ UI
-            ui_ready = wait_tiktok_ui_smart_v2(self.device, timeout=60, require_stable=True)
+            ui_ready = wait_tiktok_ui_smart(self.device, timeout=60)
 
             if ui_ready:
                 self._update_dashboard_status(u" UI đã xong, đang lấy Username...")
@@ -1563,8 +1479,11 @@ class TikTokBot:
                     time.sleep(2)
                     ok, msg, acc_id, _ = self.verify_account_logic_new(auto_username)
                     self.device.press("back") 
+                    time.sleep(1)
+                    self.device.press("back") 
                 else:
                     self._add_response_message(u"Follow xác minh thất bại!")
+                    self.device.press("back") 
             else:
                 self._add_response_message(u"Không thể mở link xác minh!")
 
@@ -1789,7 +1708,7 @@ def banner():
       \033[38;2;120;255;230m            ░           ░                  ░ ░      ░ ░      ░  ░
 \033[0m
 
-\033[38;2;255;200;140m[</>] \033[38;2;200;160;255mADMIN: NHƯ ANH ĐÃ THẤY EM   \033[38;2;255;220;160mPhiên Bản: \033[38;2;120;255;220mv3.14
+\033[38;2;255;200;140m[</>] \033[38;2;200;160;255mADMIN: NHƯ ANH ĐÃ THẤY EM   \033[38;2;255;220;160mPhiên Bản: \033[38;2;120;255;220mv3.13
 \033[38;2;255;200;140m[</>] \033[38;2;200;160;255mNhóm Telegram: \033[38;2;120;255;220mhttps://t.me/se_meo_bao_an
 \033[38;2;190;235;210m───────────────────────────────────────────────────────────────────────\033[0m
 """
@@ -2496,10 +2415,11 @@ def run_dashboard():
         while not is_stop_all():
             try:
                 layout = make_dashboard_layout()
-                if layout is not None:
+                if layout is not None:  # Chỉ update nếu hợp lệ
                     live.update(layout)
                 time.sleep(1)
             except Exception as e:
+                # Log lỗi nếu cần, nhưng không break vòng lặp
                 time.sleep(1)
 
 
