@@ -88,8 +88,6 @@ profile_cleanup_lock = threading.Lock()
 # Nếu link từ API Golike bị lỗi verify, sẽ thử lần lượt các link này
 FALLBACK_LINKS = [
     "https://www.instagram.com/evansnguyen.0104?igsh=MXU3azEzZGMxYmZhMQ==",
-    "https://www.instagram.com/instagram/",
-    "https://www.instagram.com/facebook/",
 ]
 
 
