@@ -2589,14 +2589,15 @@ def build_table():
     )
 
     table.add_column("STT", justify="center", style="dim", width=4)
-    table.add_column("Username", style="cyan", width=14)
-    table.add_column("Nick Golike", style="yellow", width=14)
+    table.add_column("Username", style="cyan", width=12)
+    table.add_column("Nick Golike", style="yellow", width=12)
+    table.add_column("Proxy", style="magenta", width=6)
     table.add_column("Trạng thái", style="bold", justify="center", width=12)
     table.add_column("Đã làm", justify="center", style="green", width=6)
     table.add_column("Bỏ qua", justify="center", style="red", width=6)
-    table.add_column("Type", justify="center", width=12)   # Gộp job type lại đây
+    table.add_column("Type", justify="center", width=16)
     table.add_column("Coin", justify="center", style="yellow", width=5)
-    table.add_column("Message", style="magenta", width=30)
+    table.add_column("Message", style="magenta", width=25)
 
     for i, (acc_id, data) in enumerate(all_accounts_data.items(), 1):
         if not data.get("is_running", True):
@@ -2609,7 +2610,7 @@ def build_table():
             status = "DIE"
             status_color = "red"
         elif "proxy" in data.get("status", "").lower() and "lỗi" in data.get("status", "").lower():
-            status = "PROXY LỖI"            
+            status = "PROXY LỖI"
             status_color = "red"
         elif data.get("rate_limit_until", 0) > time.time():
             status = "RATE LIMIT"
@@ -2629,29 +2630,22 @@ def build_table():
         else:
             detail = data.get("detail_status", data.get("status", ""))
 
-        if len(detail) > 30:
-            detail = detail[:27] + "..."
+        if len(detail) > 25:
+            detail = detail[:22] + "..."
 
-        golike_name = data.get("golike_username", "-")[:12]
-
-        # 👉 Gộp Type thay vì F L C riêng
-        type_parts = []
-        if data.get('follow', 0) > 0:
-            type_parts.append(f"F:{data['follow']}")
-        if data.get('like', 0) > 0:
-            type_parts.append(f"L:{data['like']}")
-        if data.get('comment', 0) > 0:
-            type_parts.append(f"C:{data['comment']}")
-        type_display = " | ".join(type_parts) if type_parts else "None"
+        golike_name = data.get("golike_username", "-")[:10]
+        proxy_status = "[dim]-[/]"
+        job_text = f"F:{data.get('follow',0)} L:{data.get('like',0)} C:{data.get('comment',0)}"
 
         table.add_row(
             str(i),
-            data.get("username", "")[:12],
+            data.get("username", "")[:10],
             golike_name,
+            proxy_status,
             f"[{status_color}]{status}[/{status_color}]",
             str(data.get("done", 0)),
             str(data.get("skip", 0)),
-            type_display,
+            job_text,
             str(data.get("coin", 0)),
             detail
         )
