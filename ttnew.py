@@ -2586,7 +2586,7 @@ def build_dashboard_table(animator=None):
 
 def make_dashboard_layout(animator):
     """Tạo layout dashboard với viền có animation - 4 Panel D C N X hàng ngang"""
-    chieu_cao_stats = 4
+    chieu_cao_stats = 3
     align_stats = "left"
 
     layout = Layout()
@@ -2600,7 +2600,7 @@ def make_dashboard_layout(animator):
         le_duoi = 1
 
     layout.split(
-        Layout(name="title", size=4),
+        Layout(name="title", size=3),
         Layout(name="table"),
         Layout(name="stats", size=chieu_cao_stats),
         Layout(name="gap_bottom", size=le_duoi)
