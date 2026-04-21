@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-
 # -*- coding: utf-8 -*-
 import os
 import sys
@@ -308,7 +307,7 @@ class AnimatedBox:
 
 # ==================== HÀM LẤY VERSION TIKTOK ====================
 def get_tiktok_version_from_device(device_obj, serial=None):
-    """Lấy version TikTok - không dùng cache global"""
+    """Lấy version TikTok - KHÔNG CACHE, luôn shell trực tiếp từ thiết bị"""
     try:
         result = device_obj.shell("dumpsys package com.ss.android.ugc.trill | grep versionName")
         if result and result.strip():
@@ -328,7 +327,7 @@ def get_tiktok_version_from_device(device_obj, serial=None):
 
 
 def get_all_devices_versions(devices_list):
-    """Lấy version cho tất cả device - mỗi device gọi riêng"""
+    """Lấy version cho tất cả device - mỗi device gọi riêng, không cache"""
     versions = {}
     for device in devices_list:
         try:
@@ -455,15 +454,13 @@ class TikTokBot:
         self.gui_template = None
         self._load_gui_template()
         
-        # ===== MỖI BOT CÓ CACHE RIÊNG =====
-        self.version_cache = None
-        self.version_cache_time = 0
+        # ===== ĐÃ XÓA HOÀN TOÀN self.version_cache và self.version_cache_time =====
         
-        # Cache cho UI dump riêng
+        # Cache cho UI dump - TTL = 0 để luôn lấy mới nhất
         self.ui_dump_cache = {"xml": "", "timestamp": 0, "nodes": []}
-        self.ui_dump_cache_ttl = 0.4
+        self.ui_dump_cache_ttl = 0  #  TTL = 0: luôn lấy mới UI trước mỗi lần click
         self.last_dump_time = 0
-        self.min_dump_interval = 0.15
+        self.min_dump_interval = 0.05  # Giảm interval để dump nhanh hơn
 
         # File riêng cho từng device
         self.link_job_file = None
@@ -567,15 +564,8 @@ class TikTokBot:
         time.sleep(1)
     
     def _get_tiktok_version(self):
-        now = time.time()
-        if self.version_cache and (now - self.version_cache_time) < 60:
-            return self.version_cache
-        
-        version = get_tiktok_version_from_device(self.device, self.serial)
-        if version:
-            self.version_cache = version
-            self.version_cache_time = now
-        return version
+        """ ĐÃ XÓA CACHE: Luôn lấy version trực tiếp từ thiết bị"""
+        return get_tiktok_version_from_device(self.device, self.serial)
     
     def _update_dashboard_with_version(self):
         if self.tiktok_version:
@@ -724,17 +714,18 @@ class TikTokBot:
         return not self.stop_flag and not is_stop_all()
     
     def _dump_ui_nodes(self):
+        """🔥 TTL = 0: Luôn lấy UI mới nhất từ thiết bị"""
         now = time.time()
         
+        # Giới hạn tần suất dump để tránh quá tải
         if now - self.last_dump_time < self.min_dump_interval:
+            # Nếu chưa đủ interval, trả về cache cũ (chỉ dùng để tránh spam)
             if self.ui_dump_cache["nodes"]:
                 return self.ui_dump_cache["nodes"]
+        
         self.last_dump_time = now
         
-        if (self.ui_dump_cache["nodes"] and 
-            (now - self.ui_dump_cache["timestamp"]) < self.ui_dump_cache_ttl):
-            return self.ui_dump_cache["nodes"]
-        
+        # Luôn lấy mới từ thiết bị (không dùng cache cũ dù TTL chưa hết)
         try:
             xml_content = self.device.dump_hierarchy()
             
@@ -747,13 +738,14 @@ class TikTokBot:
                 if attrs:
                     nodes.append(attrs)
             
+            # Cập nhật cache
             self.ui_dump_cache["xml"] = xml_content
             self.ui_dump_cache["timestamp"] = now
             self.ui_dump_cache["nodes"] = nodes
             
             return nodes
         except Exception:
-            return []
+            return self.ui_dump_cache.get("nodes", [])
     
     def _click_node_by_bounds(self, node):
         bounds = node.get("bounds")
@@ -813,7 +805,7 @@ class TikTokBot:
             if self.stop_flag or is_stop_all():
                 return
             if i % 10 == 0 or i <= 3:
-                self._update_dashboard_status(f"{msg_prefix} {i}s...")
+                self._update_dashboard_status(f"{msg_prefix} {i}s")
             time.sleep(1)
     
     def _get_random_delay(self, job_type):
@@ -963,7 +955,7 @@ class TikTokBot:
                     if self.stop_flag or is_stop_all():
                         break
                     if remaining_sec % 5 == 0 or remaining_sec <= 3:
-                        self._update_dashboard_status(f"Đợi thêm {remaining_sec}s...")
+                        self._update_dashboard_status(f"Đợi thêm {remaining_sec}s")
                     time.sleep(1)
             
             return elapsed
@@ -972,7 +964,7 @@ class TikTokBot:
                 if self.stop_flag or is_stop_all():
                     break
                 if remaining_sec % 5 == 0 or remaining_sec <= 3:
-                    self._update_dashboard_status(f"Đợi {remaining_sec}s...")
+                    self._update_dashboard_status(f"Đợi {remaining_sec}s")
                 time.sleep(1)
             return delay_seconds
     
@@ -1019,7 +1011,7 @@ class TikTokBot:
         if self.stop_flag or is_stop_all():
             return False
         
-        self._add_response_message("Tìm nút Like...", "like")
+        self._add_response_message("Đang làm nhiệm vụ Like", "like")
         clicked = False
         
         for i in range(max_retry):
@@ -1173,19 +1165,26 @@ class TikTokBot:
     # ========== COMMENT ==========
     
     def do_comment(self, text, link):
+        """
+         ĐÃ SỬA: Luôn lấy nội dung comment từ tham số (được truyền trực tiếp từ job_data)
+        Không lưu biến tạm giữa các thiết bị, mỗi lần gọi là nội dung mới từ API
+        """
         if not self.device:
             return False
 
         if self.stop_flag or is_stop_all():
             return False
         
+        #  Nội dung comment được truyền trực tiếp từ _process_job
+        # Mỗi lần gọi là nội dung mới từ API response
         if not text or len(text.strip()) < 1:
-            self._add_response_message("Không có nội dung comment", "comment")
+            self._add_response_message(" không có nội dung comment", "comment")
             return False
         
         comment_text = text.strip()
-        self._add_response_message("Đang mở comment...", "comment")
+        self._add_response_message(f" Đang làm nhiệm vụ comment: {comment_text[:50]}", "comment")
 
+        # Mở comment section
         comment_opened = False
         for attempt in range(4):
             if self.stop_flag or is_stop_all():
@@ -1203,17 +1202,18 @@ class TikTokBot:
                 comment_btn.click()
                 wait_ui_stable_after_action(self.device, timeout=2)
                 comment_opened = True
-                self._add_response_message("Đã mở comment section", "comment")
+                self._add_response_message(" Đã mở comment section", "comment")
                 break
             
             time.sleep(1.5)
         
         if not comment_opened:
-            self._add_response_message("Không mở được comment section", "comment")
+            self._add_response_message(" Không mở được comment section", "comment")
             return False
 
         wait_ui_stable_after_action(self.device, timeout=1)
         
+        # Tìm ô nhập comment
         input_box = self.device(className="android.widget.EditText")
         if not input_box.exists:
             input_box = self.device(resourceIdMatches=".*input.*")
@@ -1227,14 +1227,16 @@ class TikTokBot:
             except:
                 pass
             
+            # Dùng clipboard để paste nội dung comment thật từ API
             self.device.clipboard.set(comment_text)
             self.device.press("paste")
             wait_ui_stable_after_action(self.device, timeout=1)
-            self._add_response_message(f"Đã nhập nội dung: {comment_text[:30]}", "comment")
+            self._add_response_message(f" Đã nhập nội dung: {comment_text[:50]}", "comment")
         else:
-            self._add_response_message("Không tìm thấy ô nhập comment", "comment")
+            self._add_response_message(" Không tìm thấy ô nhập comment", "comment")
             return False
 
+        # Gửi comment
         click_success = False
         
         if self.gui_template is not None:
@@ -1251,17 +1253,17 @@ class TikTokBot:
                         y = max_loc[1] + h // 2
                         self.device.click(x, y)
                         click_success = True
-                        self._add_response_message(f"Đã click nút Gửi (OpenCV, độ khớp: {max_val:.2f})", "comment")
+                        self._add_response_message(f" Đã click nút Gửi (OpenCV, độ khớp: {max_val:.2f})", "comment")
                     else:
-                        self._add_response_message(f"Độ khớp OpenCV thấp ({max_val:.2f}), dùng Enter", "comment")
+                        self._add_response_message(f" Độ khớp OpenCV thấp ({max_val:.2f}), dùng Enter", "comment")
             except Exception as e:
-                self._add_response_message(f"Lỗi OpenCV: {str(e)[:30]}, dùng Enter", "comment")
+                self._add_response_message(f" Lỗi OpenCV: {str(e)[:30]}, dùng Enter", "comment")
         else:
-            self._add_response_message("Không có template gui.png, dùng Enter", "comment")
+            self._add_response_message(" Không có template gui.png, dùng Enter", "comment")
         
         if not click_success:
             self.device.press("enter")
-            self._add_response_message("Đã nhấn Enter để gửi comment", "comment")
+            self._add_response_message(" Đã nhấn Enter để gửi comment", "comment")
 
         if self.stop_flag or is_stop_all():
             return False
@@ -1269,19 +1271,24 @@ class TikTokBot:
         self.previous_job_link = link
         
         wait_ui_stable_after_action(self.device, timeout=1)
-        self._add_response_message("Comment thành công", "comment")
+        self._add_response_message(" Comment thành công!", "comment")
         return True
     
-    # ========== API GOLIKE ==========
+    # ========== API GOLIKE - LẤY RESPONSE THẬT ==========
     
     def _parse_api_response(self, response, func_name="api_call"):
+        """
+        Parse API response - Lấy đầy đủ thông tin thật từ server
+        Không dùng message fake
+        """
         result = {
             'success': False,
             'status_code': None,
             'message': '',
             'data': None,
             'is_limit': False,
-            'is_checkpoint': False
+            'is_checkpoint': False,
+            'raw_response': None  # Lưu raw response để debug
         }
         
         try:
@@ -1290,18 +1297,37 @@ class TikTokBot:
             try:
                 resp_json = response.json()
                 result['data'] = resp_json
-                result['message'] = resp_json.get('message', resp_json.get('msg', f"HTTP {response.status_code}"))
+                result['raw_response'] = resp_json
                 
-                if response.status_code == 200 and resp_json.get('status') == 200:
-                    result['success'] = True
+                # Lấy message thật từ response
+                # Ưu tiên: message > msg > status message
+                result['message'] = resp_json.get('message', '')
+                if not result['message']:
+                    result['message'] = resp_json.get('msg', '')
+                if not result['message']:
+                    result['message'] = resp_json.get('status_message', '')
+                if not result['message']:
+                    result['message'] = f"HTTP {response.status_code}"
                 
+                # Kiểm tra success dựa trên response thực tế
+                if response.status_code == 200:
+                    # Kiểm tra status field
+                    status_val = resp_json.get('status')
+                    if status_val == 200 or status_val is True:
+                        result['success'] = True
+                    elif isinstance(status_val, int) and status_val < 300:
+                        result['success'] = True
+                    elif resp_json.get('success') is True:
+                        result['success'] = True
+                
+                # Kiểm tra limit/checkpoint từ message thật
                 msg_lower = result['message'].lower()
                 if any(kw in msg_lower for kw in ['limit', 'giới hạn', 'quá nhiều', 'too many']):
                     result['is_limit'] = True
                 if any(kw in msg_lower for kw in ['checkpoint', 'verify', 'xác minh']):
                     result['is_checkpoint'] = True
                     
-            except:
+            except json.JSONDecodeError:
                 result['message'] = response.text if response.text else f"HTTP {response.status_code}"
                 
         except Exception as e:
@@ -1310,6 +1336,7 @@ class TikTokBot:
         return result
     
     def _chonacc(self):
+        """Lấy danh sách tài khoản TikTok từ Golike"""
         try:
             response = self.session.get('https://gateway.golike.net/api/tiktok-account', headers=self.headers, timeout=25)
             parsed = self._parse_api_response(response, "chonacc")
@@ -1323,6 +1350,7 @@ class TikTokBot:
             return {"status": 500, "message": str(e), "data": []}
     
     def _nhannv(self):
+        """Nhận nhiệm vụ từ Golike - Lấy response thật"""
         try:
             params = {'account_id': self.account_id_val, 'data': 'null'}
             response = self.session.get('https://gateway.golike.net/api/advertising/publishers/tiktok/jobs',
@@ -1337,6 +1365,7 @@ class TikTokBot:
             return {"status": 500, "message": str(e)}
     
     def _baoloi(self, ads_id, object_id, loai):
+        """Báo lỗi nhiệm vụ - Lấy response thật"""
         try:
             json_data = {'ads_id': ads_id, 'object_id': object_id, 'account_id': self.account_id_val, 'type': loai}
             response = self.session.post('https://gateway.golike.net/api/advertising/publishers/tiktok/skip-jobs',
@@ -1351,6 +1380,7 @@ class TikTokBot:
             return {"status": 500, "message": str(e)}
     
     def _hoanthanh(self, ads_id):
+        """Hoàn thành nhiệm vụ - Lấy response thật"""
         try:
             json_data = {
                 'ads_id': ads_id,
@@ -1369,8 +1399,11 @@ class TikTokBot:
             return {"status": False, "message": str(e)}
     
     def _get_job_price(self, job_data):
+        """Lấy giá job từ data thật"""
         try:
-            for key in ['price_after_cost', 'price_per_after_cost', 'amount', 'reward', 'price', 'money', 'coin']:
+            # Các key có thể chứa giá
+            price_keys = ['price_after_cost', 'price_per_after_cost', 'amount', 'reward', 'price', 'money', 'coin']
+            for key in price_keys:
                 if key in job_data and job_data[key]:
                     val = job_data[key]
                     if isinstance(val, dict):
@@ -1390,16 +1423,53 @@ class TikTokBot:
         except:
             return 0
     
+    def _get_comment_text_from_job(self, job_data):
+        """
+        🔥 Lấy nội dung comment từ job data - MỖI LẦN GỌI LÀ LẤY MỚI TỪ JOB_DATA
+        Không lưu biến tạm, đảm bảo mỗi device dùng nội dung riêng từ API
+        """
+        try:
+            # Cấu trúc 1: message trực tiếp trong data
+            if 'message' in job_data and job_data['message']:
+                return job_data['message'].strip()
+            
+            # Cấu trúc 2: trong count_run (từ ảnh)
+            if 'count_run' in job_data and isinstance(job_data['count_run'], dict):
+                if 'message' in job_data['count_run'] and job_data['count_run']['message']:
+                    return job_data['count_run']['message'].strip()
+            
+            # Cấu trúc 3: trong data của response
+            if 'data' in job_data and isinstance(job_data['data'], dict):
+                if 'message' in job_data['data'] and job_data['data']['message']:
+                    return job_data['data']['message'].strip()
+                if 'count_run' in job_data['data']:
+                    if 'message' in job_data['data']['count_run']:
+                        return job_data['data']['count_run']['message'].strip()
+            
+            # Cấu trúc 4: text/description/content
+            for key in ['text', 'description', 'content', 'noidung', 'comment_text']:
+                if key in job_data and job_data[key]:
+                    return job_data[key].strip()
+            
+            return None
+        except Exception:
+            return None
+    
     def _process_job(self, job_data):
+        """
+         Xử lý job - Lấy comment text từ job data THẬT mỗi lần gọi
+        Không lưu cache comment giữa các lần
+        """
         try:
             if self.stop_flag or is_stop_all():
                 return False, "Dừng theo yêu cầu", None, 0
             
-            link = job_data["link"]
-            action_type = job_data["type"]
-            ads_id = job_data["id"]
+            link = job_data.get("link")
+            action_type = job_data.get("type")
+            ads_id = job_data.get("id")
             job_price = self._get_job_price(job_data)
 
+            # Lọc follow theo giá
             if action_type == "follow" and job_price < self.min_follow_price:
                 return False, f"Job Follow giá {job_price}đ < {self.min_follow_price}đ", ads_id, job_price
 
@@ -1424,21 +1494,24 @@ class TikTokBot:
                 success = self.do_favorite()
                 reason = "Favorite thất bại" if not success else "Favorite thành công"
             elif action_type == "comment":
-                comment_text = (
-                    job_data.get("text") or
-                    job_data.get("description") or
-                    job_data.get("comment") or
-                    job_data.get("content") or
-                    job_data.get("noidung") or
-                    job_data.get("message") or
-                    ""
-                )
+                #  Lấy nội dung comment từ job data THẬT của Golike
+                # Mỗi lần gọi _process_job là lấy mới, không dùng cache
+                comment_text = self._get_comment_text_from_job(job_data)
+                
+                # Log để debug
+                self._add_response_message(f" Nội dung comment từ API: {comment_text[:100] if comment_text else 'KHÔNG CÓ'}", "comment")
+                
+                if not comment_text:
+                    # KHÔNG dùng text dự phòng - báo lỗi để Golike xử lý
+                    return False, "API không cung cấp nội dung comment", ads_id, job_price
+                
                 success = self.do_comment(comment_text, link)
                 reason = "Comment thất bại" if not success else "Comment thành công"
 
             if not success:
                 return False, reason, ads_id, job_price
 
+            # Hoàn thành job
             result = self._hoanthanh(ads_id)
             if result.get('status'):
                 video_id = self._get_video_id(link)
@@ -1532,12 +1605,12 @@ class TikTokBot:
         
         while self.username_retry_count < self.max_username_retries and not self.stop_flag and not is_stop_all():
             self.username_retry_count += 1
-            self._update_dashboard_status(f"Đang đợi UI load (Lần {self.username_retry_count}/{self.max_username_retries})...")
+            self._update_dashboard_status(f"Đang đợi UI load (Lần {self.username_retry_count}/{self.max_username_retries})")
             
             self.device.app_start(TIKTOK_PACKAGE)
             
             wait_time = self.delay_config.get('delay_open', 10)
-            self._update_dashboard_status(f"Đợi {wait_time}s cho TikTok load xong...")
+            self._update_dashboard_status(f"Chờ {wait_time}s TikTok load xong")
             
             elapsed = 0
             while elapsed < wait_time and not self.stop_flag and not is_stop_all():
@@ -1551,13 +1624,13 @@ class TikTokBot:
             ui_ready = wait_tiktok_ui_smart(self.device, timeout=20)
 
             if ui_ready:
-                self._update_dashboard_status("UI đã xong, đang lấy Username...")
+                self._update_dashboard_status("UI đã xong, đang get Username")
                 username = self._click_username_by_dump()
                 if username and len(username) > 2:
                     self._add_response_message(f"Đã lấy username: @{username}")
                     self.username_retry_count = 0
                     return username
-                self._add_response_message("Không tìm thấy tên trên màn hình...")
+                self._add_response_message("Không tìm thấy tên trên màn hình")
             else:
                 self._add_response_message(f"Quá {wait_time + 20}s máy không load nổi UI. Buộc dừng!")
 
@@ -1606,38 +1679,38 @@ class TikTokBot:
         if not auto_username:
             return None, None
 
-        self._add_response_message("Kiểm tra acc trên hệ thống...")
+        self._add_response_message("Kiểm tra acc trên hệ thống")
         chontiktok = self._chonacc()
         for acc in chontiktok.get("data", []):
             if acc.get("unique_username", "").strip().lower() == auto_username:
-                self._add_response_message(f"Tài khoản @{auto_username} đã sẵn sàng.")
+                self._add_response_message(f" Tài khoản @{auto_username} đã sẵn sàng.")
                 return acc.get("id"), auto_username
 
-        self._add_response_message(f"Đang Add tài khoản @{auto_username}...")
+        self._add_response_message(f" Đang Add tài khoản @{auto_username}")
         ok, msg, acc_id, target_link = self.verify_account_logic_new(auto_username)
 
         if not ok and target_link:
-            self._add_response_message(f"Đang follow link xác minh: {target_link}")
+            self._add_response_message(f" Đang follow link xác minh: {target_link}")
             if self._open_link(target_link):
                 wait_ui_stable_after_action(self.device, timeout=2)
                 if self.do_follow():
-                    self._add_response_message("Follow xác minh thành công!")
+                    self._add_response_message(" Follow xác minh thành công!")
                     time.sleep(2)
                     ok, msg, acc_id, _ = self.verify_account_logic_new(auto_username)
                     self.device.press("back") 
                     time.sleep(1)
                     self.device.press("back") 
                 else:
-                    self._add_response_message("Follow xác minh thất bại!")
+                    self._add_response_message(" Follow xác minh thất bại!")
                     self.device.press("back") 
             else:
-                self._add_response_message("Không thể mở link xác minh!")
+                self._add_response_message(" Không thể mở link xác minh!")
 
         if ok and acc_id:
-            self._add_response_message(f"Add thành công! ID: {acc_id}")
+            self._add_response_message(f" Add thành công! ID: {acc_id}")
             return acc_id, auto_username
         
-        self._add_response_message(f"Add thất bại: {msg}")
+        self._add_response_message(f" Add thất bại: {msg}")
         return None, None
     
     # ==================== HÀM CHẠY CHÍNH ====================
@@ -1649,8 +1722,8 @@ class TikTokBot:
         with dashboard_lock:
             accounts_data[temp_account_id] = {
                 "username": "None",
-                "status": "Đang kết nối...",
-                "last_message": "Đang kết nối thiết bị...",
+                "status": "Đang kết nối",
+                "last_message": "Đang kết nối thiết bị",
                 "message_time": get_vn_time().strftime('%H:%M:%S'),
                 "job_type": "",
                 "xu": 0,
@@ -1664,40 +1737,41 @@ class TikTokBot:
                 "tiktok_version": None
             }
         
-        self._add_response_message("Đang kết nối thiết bị...")
+        self._add_response_message("Đang kết nối thiết bị")
         
         try:
             self.device = u2.connect(self.serial)
             self.device.info
-            self._add_response_message("Kết nối thiết bị thành công")
+            self._add_response_message(" Kết nối thiết bị thành công")
             
-            self._add_response_message("Đang lấy phiên bản TikTok...")
+            self._add_response_message(" Đang lấy phiên bản TikTok")
+            #  KHÔNG CACHE: Luôn lấy trực tiếp từ thiết bị
             self.tiktok_version = self._get_tiktok_version()
             if self.tiktok_version:
-                self._add_response_message(f"Phiên bản TikTok: {self.tiktok_version}")
+                self._add_response_message(f" Phiên bản TikTok: {self.tiktok_version}")
                 self._update_dashboard_with_version()
             else:
-                self._add_response_message("Không lấy được phiên bản TikTok")
+                self._add_response_message(" Không lấy được phiên bản TikTok")
                 
         except Exception as e:
-            self._add_response_message(f"Kết nối thiết bị thất bại: {str(e)}")
+            self._add_response_message(f" Kết nối thiết bị thất bại: {str(e)}")
             with dashboard_lock:
                 if temp_account_id in accounts_data:
                     del accounts_data[temp_account_id]
             return
         
         if self.force_stop_enabled:
-            self._add_response_message("Đang force stop TikTok...")
+            self._add_response_message(" Đang force stop TikTok")
             self._force_stop_tiktok()
             time.sleep(1.2)
         
-        self._add_response_message("Đang mở TikTok...")
+        self._add_response_message(" Đang mở TikTok")
         self._start_tiktok_and_wait()
         
         final_account_id, auto_username = self.auto_setup_account()
         
         if not final_account_id or not auto_username:
-            self._add_response_message("Không thể thiết lập tài khoản. Dừng luồng.")
+            self._add_response_message(" Không thể thiết lập tài khoản. Dừng luồng.")
             with dashboard_lock:
                 if temp_account_id in accounts_data:
                     del accounts_data[temp_account_id]
@@ -1711,14 +1785,14 @@ class TikTokBot:
             if final_account_id in accounts_data:
                 accounts_data[final_account_id]["username"] = auto_username
                 accounts_data[final_account_id]["status"] = "Sẵn sàng"
-                accounts_data[final_account_id]["last_message"] = f"Đã xác thực @{auto_username}"
+                accounts_data[final_account_id]["last_message"] = f" Đã xác thực @{auto_username}"
                 accounts_data[final_account_id]["tiktok_version"] = self.tiktok_version
                 accounts_data[final_account_id]["last_update"] = time.time()
             else:
                 accounts_data[final_account_id] = {
                     "username": auto_username,
                     "status": "Sẵn sàng",
-                    "last_message": f"Đã xác thực @{auto_username}",
+                    "last_message": f" Đã xác thực @{auto_username}",
                     "message_time": get_vn_time().strftime('%H:%M:%S'),
                     "job_type": "",
                     "xu": 0,
@@ -1738,17 +1812,17 @@ class TikTokBot:
         num_videos_khoi_dong = self.delay_config.get('nuoi_nick', 2)
         share_rate = self.delay_config.get('share_rate', 15)
         if num_videos_khoi_dong > 0:
-            self._add_response_message("Đang nuôi nick khởi động...")
+            self._add_response_message(" Đang nuôi nick ")
             self.nuoi_nick_short(num_videos=num_videos_khoi_dong, share_rate=share_rate)
         
         self._reset_retry_counter()
         
         while not self.stop_flag and not is_stop_all():
             try:
-                self._update_dashboard_status("Đang tìm nhiệm vụ...")
+                self._update_dashboard_status(" Đang tìm nhiệm vụ")
                 
                 delay_time = self._get_random_delay('job')
-                self._delay_countdown(delay_time, "Đang tìm nhiệm vụ")
+                self._delay_countdown(delay_time, " Đang tìm nhiệm vụ")
 
                 nhanjob = self._nhannv()
                 
@@ -1770,29 +1844,29 @@ class TikTokBot:
 
                     if self._is_link_processed(current_link):
                         skip_msg = self._baoloi(data["id"], data["object_id"], data["type"])
-                        self._add_response_message(f"Đã bỏ qua video đã làm: {skip_msg.get('message', '')}")
+                        self._add_response_message(f" Đã bỏ qua video đã làm: {skip_msg.get('message', '')}")
                         continue
 
                     if data["type"] not in self.lam:
                         skip_msg = self._baoloi(data["id"], data["object_id"], data["type"])
-                        self._add_response_message(f"Bỏ qua job {data['type']}: {skip_msg.get('message', '')}")
+                        self._add_response_message(f" Bỏ qua job {data['type']}: {skip_msg.get('message', '')}")
                         time.sleep(0.5)
                         continue
 
                     status_map = {
-                        "follow": "Đang follow...",
-                        "like": "Đang like...",
-                        "comment": "Đang comment...",
-                        "favorite": "Đang favorite..."
+                        "follow": " Đang follow",
+                        "like": " Đang like",
+                        "comment": " Đang comment",
+                        "favorite": " Đang favorite"
                     }
-                    self._update_dashboard_status(status_map.get(data["type"], "Đang xử lý..."))
+                    self._update_dashboard_status(status_map.get(data["type"], " Đang xử lý"))
 
                     success, reason, job_ads_id, job_price = self._process_job(data)
 
                     if success:
                         self.job_count += 1
                         self._update_dashboard_stats(data["type"], job_price, success=True)
-                        self._add_response_message(f"{reason} - Giá: {job_price} xu")
+                        self._add_response_message(f" {reason} - Giá: {job_price} xu")
                         
                         delay_time_done = self.delay_config.get('delay_done', 9)
                         share_rate_normal = self.delay_config.get('share_rate', 15)
@@ -1801,13 +1875,13 @@ class TikTokBot:
                             self.nuoi_nick_thong_minh(delay_time_done, share_rate_normal)
                         
                         if self.force_stop_after > 0 and self.job_count >= self.force_stop_after:
-                            self._add_response_message(f"Đạt {self.job_count} job, force stop TikTok...")
+                            self._add_response_message(f" Đạt {self.job_count} job, force stop TikTok")
                             self._force_stop_tiktok()
                             self.job_count = 0
                             self._start_tiktok_and_wait()
                     else:
                         self._update_dashboard_stats(data["type"], 0, success=False)
-                        self._add_response_message(f"{reason}")
+                        self._add_response_message(f" {reason}")
                         
                         num_videos_loi = max(1, self.delay_config.get('nuoi_nick', 2) // 2)
                         share_rate_loi = self.delay_config.get('share_rate', 15)
@@ -1819,13 +1893,13 @@ class TikTokBot:
                 else:
                     error_msg = nhanjob.get("message", "Lỗi không xác định")
                     retry_wait = self._increment_retry_counter()
-                    self._add_response_message(f"API: {error_msg} - Thử lại sau {retry_wait}s")
+                    self._add_response_message(f"{error_msg} - Thử lại sau {retry_wait}s")
                     
                     num_videos = self.delay_config.get('nuoi_nick', 2)
                     share_rate_cao = random.randint(30, 50)
                     self.nuoi_nick_short(num_videos=num_videos, share_rate=share_rate_cao, is_high_trust_mode=True)
                     
-                    self._delay_countdown(retry_wait, "Lỗi API - Thử lại sau")
+                    self._delay_countdown(retry_wait, "Thử lại sau")
                     
             except Exception as e:
                 if self.stop_flag or is_stop_all():
@@ -1833,9 +1907,9 @@ class TikTokBot:
                 
                 retry_wait = self._increment_retry_counter()
                 self._add_response_message(f"Lỗi: {str(e)} - Thử lại sau {retry_wait}s")
-                self._delay_countdown(retry_wait, "Lỗi - Thử lại sau")
+                self._delay_countdown(retry_wait, " Lỗi - Thử lại sau")
         
-        self._add_response_message("Bot đã dừng")
+        self._add_response_message(" Bot đã dừng")
 
 
 # ==================== CÁC HÀM HỖ TRỢ ====================
@@ -1854,7 +1928,7 @@ def banner():
       \033[38;2;120;255;230m            ░           ░                  ░ ░      ░ ░      ░  ░
 \033[0m
 
-\033[38;2;255;200;140m[</>] \033[38;2;200;160;255mADMIN: NHƯ ANH ĐÃ THẤY EM   \033[38;2;255;220;160mPhiên Bản: \033[38;2;120;255;220mv3.16
+\033[38;2;255;200;140m[</>] \033[38;2;200;160;255mADMIN: NHƯ ANH ĐÃ THẤY EM   \033[38;2;255;220;160mPhiên Bản: \033[38;2;120;255;220mv3.18
 \033[38;2;255;200;140m[</>] \033[38;2;200;160;255mNhóm Telegram: \033[38;2;120;255;220mhttps://t.me/se_meo_bao_an
 \033[38;2;190;235;210m───────────────────────────────────────────────────────────────────────\033[0m
 """
@@ -2086,7 +2160,7 @@ def render_tablet(selections, current_idx):
         elif selections[i] == 'n':
             status = "[bold #ff4d6d] Bỏ qua[/]"
         elif i == current_idx:
-            status = "[blink bold #ffff00] Đang chờ...[/]"
+            status = "[blink bold #ffff00] Đang chờ[/]"
         else:
             status = "[dim] Chưa chọn[/]"
 
@@ -2350,8 +2424,8 @@ def display_auth_menu():
     auth_tokens = read_authorizations()
     
     if not auth_tokens:
-        console.print(u"⚠ Chưa có Authorization nào! Vui lòng nhập Authorization.")
-        new_auth = console.input(u"✈ Nhập Authorization: ").strip()
+        console.print(u" Chưa có Authorization nào! Vui lòng nhập Authorization.")
+        new_auth = console.input(u" Nhập Authorization: ").strip()
         if new_auth:
             save_authorization(new_auth)
             return new_auth
@@ -2374,7 +2448,7 @@ def display_auth_menu():
             line = f"[#00ffff][{idx}][/] [#ff99cc]{username}[/] | [#99ff99]{coin} coin[/]"
         else:
             msg = acc.get('message', 'Lỗi hệ thống')[:30]
-            line = f"[#00ffff][{idx}][/] [red]ERROR:[/] [#ff4444]{msg}[/]"
+            line = f"[#00ffff][{idx}][/] [red]:[/] [#ff4444]{msg}[/]"
         
         acc_lines.append(line)
     
@@ -2391,7 +2465,7 @@ def display_auth_menu():
     console.print(panel_acc)
     
     panel_input = Panel(
-        u'[#cccccc]Enter để tiếp tục, nhập "t" để thêm tài khoản golike:[/]',
+        u'[#cccccc]Enter: [#ff9ecb]để tiếp tục [#d7d7a8]với tài khoản đã [#ffd4b8]chọn nhập [#ff9ecb]"t" [#99ff99]thêm tài [#ff9ecb]khoản mới [#00ffff]nhập số [#ff6b6b]để chọn [#99ff99]tài khoản:[/]',
         border_style="#d7d7a8",
         padding=(0, 1),
         width=80
@@ -2403,25 +2477,28 @@ def display_auth_menu():
     if choice == '':
         valid_accounts = [acc for acc in accounts if acc.get("success")]
         if valid_accounts:
-            return valid_accounts[0]["auth"]
+            selected = valid_accounts[0]
+            console.print(f"\n[bold #00ff9c] Đã chọn tài khoản: {selected['username']} | {selected['coin']} coin[/]")
+            time.sleep(1.5)
+            return selected["auth"]
         else:
             console.print(u" Không có tài khoản hợp lệ nào!")
             sys.exit(1)
     elif choice == 't':
-        new_auth = console.input(u"\n[white]Authorization: [/]").strip()
+        new_auth = console.input(u"\n[white] Authorization mới: [/]").strip()
         if not new_auth:
-            console.print(u"Authorization không được để trống!")
+            console.print(u" Authorization không được để trống!")
             time.sleep(1.5)
             return display_auth_menu()
         
-        console.print(u"Đang kiểm tra Authorization...")
+        console.print(u" Đang kiểm tra Authorization")
         session = requests.Session()
         result = get_user_me(new_auth, session)
         
         if result.get("success"):
-            console.print(f" Authorization hợp lệ! : {result['username']} | {result['coin']} coin")
+            console.print(f" Authorization hợp lệ! [{result['username']}] | {result['coin']} coin")
             save_authorization(new_auth)
-            time.sleep(1)
+            time.sleep(1.5)
             return new_auth
         else:
             console.print(f" Authorization không hợp lệ! Lỗi: {result.get('message', 'Unknown error')}")
@@ -2435,17 +2512,19 @@ def display_auth_menu():
         if 0 <= idx < len(accounts):
             acc = accounts[idx]
             if acc.get("success"):
+                console.print(f"\n[bold #00ff9c] Đã chọn tài khoản: {acc['username']} | {acc['coin']} coin[/]")
+                time.sleep(1.5)
                 return acc["auth"]
             else:
                 console.print(u" Tài khoản này không hợp lệ!")
                 time.sleep(1.5)
                 return display_auth_menu()
         else:
-            console.print(u"Số không hợp lệ!")
+            console.print(u" Số không hợp lệ!")
             time.sleep(1)
             return display_auth_menu()
     else:
-        console.print(u"Lựa chọn không hợp lệ!")
+        console.print(u" Lựa chọn không hợp lệ!")
         time.sleep(1)
         return display_auth_menu()
 
@@ -2460,7 +2539,7 @@ def build_dashboard_table(animator=None):
         show_lines=True
     )
     
-    table.add_column("STT", justify="center", style="dim", width=4)
+    table.add_column("STT", justify="center", style="dim", width=5)
     table.add_column("Device", style="#a78bfa", width=20)
     table.add_column("usname", style="#00ffff", width=14)
     table.add_column("Fail", style="#ff4d6d", justify="center", width=7)
@@ -2478,7 +2557,7 @@ def build_dashboard_table(animator=None):
         devices_list.sort(key=lambda x: x[0], reverse=True)
         
         for i, (_, acc_id, data) in enumerate(devices_list, 1):
-            status = str(data.get("status", "đang chờ..."))[:900]
+            status = str(data.get("status", "đang chờ"))[:900]
             job_type = data.get("job_type", "")
             msg_time = data.get("message_time", "")
             time_display = f"[dim]{msg_time}[/dim] " if msg_time else ""
@@ -2528,7 +2607,7 @@ def make_dashboard_layout(animator):
     )
 
     layout["title"].update(
-        Align.center("[bold #ffffff]TOOL GOLIKE TIKTOK [#00ff9c]BY PHONG TUS[/]")
+        Align.center("[bold #ffffff] TOOL GOLIKE TIKTOK [#00ff9c]BY PHONG TUS[/]")
     )
 
     with dashboard_lock:
@@ -2537,13 +2616,13 @@ def make_dashboard_layout(animator):
         total_fail = sum(d.get("fail", 0) for d in accounts_data.values())
         total_devices = len(accounts_data)
 
-        # Nội dung bên trong mỗi Panel - format giống ảnh
+        # Nội dung bên trong mỗi Panel
         content_d = f"[bold #00ffff]Thiết bị: {total_devices}[/]"
         content_c = f"[bold #ffd54f]Tổng Xu: {total_xu}[/]"
         content_n = f"[bold #00ff9c]Job Done: {total_done}[/]"
         content_x = f"[bold #ff4d6d]Job Fail: {total_fail}[/]"
 
-        # Tạo 4 Panel riêng biệt, title là chữ D, C, N, X
+        # Tạo 4 Panel riêng biệt
         panel_d = Panel(content_d, title="[bold #00ffff]D[/]", title_align="center", border_style="#00ffff", padding=(0, 2))
         panel_c = Panel(content_c, title="[bold #ffd54f]C[/]", title_align="center", border_style="#ffd54f", padding=(0, 2))
         panel_n = Panel(content_n, title="[bold #00ff9c]N[/]", title_align="center", border_style="#00ff9c", padding=(0, 2))
@@ -2552,7 +2631,7 @@ def make_dashboard_layout(animator):
     # Grid 4 cột đều nhau
     stats_grid = Table.grid(expand=False)
     stats_grid.add_column(width=60)
-    stats_grid.add_column(width=17)  # D - hẹp nhất
+    stats_grid.add_column(width=17)  # D
     stats_grid.add_column(width=17)  # N
     stats_grid.add_column(width=17)  # X
     stats_grid.add_row(panel_c, panel_d, panel_n, panel_x)
@@ -2581,7 +2660,7 @@ def run_dashboard():
 
     layout = make_dashboard_layout(animator)
 
-    # 🔥 lưu kích thước ban đầu
+    #  lưu kích thước ban đầu
     last_size = console.size
 
     with Live(
@@ -2596,7 +2675,7 @@ def run_dashboard():
 
         while not is_stop_all():
             try:
-                # 🔥 FIX: detect resize (bật/tắt bàn phím)
+                #  FIX: detect resize (bật/tắt bàn phím)
                 current_size = console.size
                 if current_size != last_size:
                     layout = make_dashboard_layout(animator)
@@ -2635,7 +2714,7 @@ if __name__ == "__main__":
     clear_stop_all()
     
     def signal_handler(sig, frame):
-        print("\n[yellow] Nhận tín hiệu dừng, đang thoát an toàn...[/]")
+        print("\n[yellow] Đã dừng[/]")
         set_stop_all()
         sys.exit(0)
     
@@ -2645,7 +2724,7 @@ if __name__ == "__main__":
     banner()
     
     auth_token = display_auth_menu()
-    console.print("✓ Đã chọn Authorization")
+    console.print(" Đã chọn Authorization")
     time.sleep(1)
     
     console.print("[yellow] CẤU HÌNH DELAY VÀ THÔNG SỐ[/]")
@@ -2653,15 +2732,15 @@ if __name__ == "__main__":
     
     lam = menu_jobs()
     
-    console.print("[yellow]Tiến hành kết nối thiết bị ADB...[/]")
+    console.print("[yellow] Tiến hành kết nối thiết bị ADB[/]")
     
     selected_serials = select_devices()
     
     if not selected_serials:
-        console.print("[red]Không có thiết bị nào được chọn! Thoát tool.[/]")
+        console.print("[red] Không có thiết bị nào được chọn! Thoát tool.[/]")
         sys.exit(1)
     
-    console.print(f"✓ Đã chọn {len(selected_serials)} thiết bị để chạy song song")
+    console.print(f" Đã chọn {len(selected_serials)} thiết bị để chạy song song")
     time.sleep(2)
     
     dashboard_thread = threading.Thread(target=run_dashboard, daemon=True)
@@ -2697,13 +2776,16 @@ if __name__ == "__main__":
         
         try:
             for future in as_completed(futures):
-                serial = futures[future]
                 try:
                     future.result()
-                except:
+                except KeyboardInterrupt:
+                    raise
+                except Exception:
                     pass
+
         except KeyboardInterrupt:
-            console.print("\n[yellow] Đang dừng tất cả các luồng...[/]")
+            console.print("\n[yellow]Đang dừng tất cả các luồng[/]")
             set_stop_all()
+
             for future in futures:
                 future.cancel()
