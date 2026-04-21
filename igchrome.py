@@ -2591,7 +2591,7 @@ def build_table():
     table.add_column("STT", justify="center", style="dim", width=4)
     table.add_column("Username", style="cyan", width=12)
     table.add_column("Nick Golike", style="yellow", width=12)
-    table.add_column("Proxy", style="magenta", width=6)
+    # Đã xóa dòng Proxy
     table.add_column("Trạng thái", style="bold", justify="center", width=12)
     table.add_column("Đã làm", justify="center", style="green", width=6)
     table.add_column("Bỏ qua", justify="center", style="red", width=6)
@@ -2634,14 +2634,14 @@ def build_table():
             detail = detail[:22] + "..."
 
         golike_name = data.get("golike_username", "-")[:10]
-        proxy_status = "[dim]-[/]"
-        job_text = f"F:{data.get('follow',0)} L:{data.get('like',0)} C:{data.get('comment',0)}"
+        # Đã xóa proxy_status
+        job_text = f"[#00ffff]F:{data.get('follow',0)} [#ffffff]L:{data.get('like',0)} [#ff6b6b]C:{data.get('comment',0)}"
 
         table.add_row(
             str(i),
             data.get("username", "")[:10],
             golike_name,
-            proxy_status,
+            # Đã xóa proxy_status ở vị trí thứ 4
             f"[{status_color}]{status}[/{status_color}]",
             str(data.get("done", 0)),
             str(data.get("skip", 0)),
