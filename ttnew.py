@@ -2460,16 +2460,15 @@ def build_dashboard_table(animator=None):
         show_lines=True
     )
     
-    table.add_column("STT", justify="center", style="#ffd54f", width=4)
+    table.add_column("STT", justify="center", style="dim", width=4)
     table.add_column("Device", style="#a78bfa", width=20)
     table.add_column("usname", style="#00ffff", width=14)
     table.add_column("Fail", style="#ff4d6d", justify="center", width=7)
-    table.add_column("Type", style="#38bdf8", width=8)
-    table.add_column(u"Xu", style="#ff9ecb", width=5)
-    table.add_column(u"Tổng", style="#facc15", width=6)
-    table.add_column("Done", style="#00ff9c", width=7)
-    table.add_column("Status", style="#ffffff", width=60)
-    
+    table.add_column("Type", justify="center", style="#38bdf8", width=8)
+    table.add_column("Xu", justify="center", width=5)
+    table.add_column("Tổng", justify="center", style="#facc15", width=6)
+    table.add_column("Done", style="magenta", width=7)
+    table.add_column("Message", style="#ffffff", width=60)
     with dashboard_lock:
         devices_list = []
         for acc_id, data in accounts_data.items():
