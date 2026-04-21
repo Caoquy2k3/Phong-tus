@@ -2506,59 +2506,59 @@ def build_dashboard_table(animator=None):
 
 
 def make_dashboard_layout(animator):
-    """Tạo layout dashboard với viền có animation"""
-    order = ["xu", "dev", "act", "rate", "avg", "done", "fail", "err"]
+    """Tạo layout dashboard với viền có animation - 4 Panel D C N X hàng ngang"""
     chieu_cao_stats = 4
     align_stats = "left"
 
     layout = Layout()
-    
     try:
         console_height = console.height
         with dashboard_lock:
             row_count = len(accounts_data) + 2
-        table_rows = min(row_count, console_height - 10)
-        le_duoi = max(0, console_height - 7 - table_rows - chieu_cao_stats)
+            table_rows = min(row_count, console_height - 10)
+            le_duoi = max(0, console_height - 7 - table_rows - chieu_cao_stats)
     except:
         le_duoi = 1
-    
+
     layout.split(
-        Layout(name="title", size=3),
+        Layout(name="title", size=4),
         Layout(name="table"),
         Layout(name="stats", size=chieu_cao_stats),
         Layout(name="gap_bottom", size=le_duoi)
     )
-    
+
     layout["title"].update(
         Align.center("[bold #ffffff]TOOL GOLIKE TIKTOK [#00ff9c]BY PHONG TUS[/]")
     )
-    
+
     with dashboard_lock:
         total_xu = sum(d.get("total_xu", 0) for d in accounts_data.values())
         total_done = sum(d.get("done", 0) for d in accounts_data.values())
         total_fail = sum(d.get("fail", 0) for d in accounts_data.values())
         total_devices = len(accounts_data)
-        now = time.time()
-        active_devices = sum(1 for d in accounts_data.values() if now - d.get("last_update", 0) < 60)
-        error_devices = sum(1 for d in accounts_data.values() if "error" in d.get("status", "").lower() or "lỗi" in d.get("status", "").lower())
-        success_rate = round((total_done / (total_done + total_fail) * 100), 1) if (total_done + total_fail) > 0 else 0
-        avg_xu = round(total_xu / total_devices, 1) if total_devices > 0 else 0
 
-    panels = {
-        "xu": Panel(f"[bold #ffd54f]TỔNG XU\n{total_xu}[/]", border_style="#ffd54f", box=box.ROUNDED),
-        "dev": Panel(f"[bold #00ffff]THIẾT BỊ\n{total_devices}[/]", border_style="#00ffff", box=box.ROUNDED),
-        "act": Panel(f"[bold #00ff9c]ACTIVE\n{active_devices}[/]", border_style="#00ff9c", box=box.ROUNDED),
-        "err": Panel(f"[bold #ff4d6d]LỖI\n{error_devices}[/]", border_style="#ff4d6d", box=box.ROUNDED),
-        "done": Panel(f"[bold #00ff9c]DONE\n{total_done}[/]", border_style="#00ff9c", box=box.ROUNDED),
-        "fail": Panel(f"[bold #ff4d6d]FAIL\n{total_fail}[/]", border_style="#ff4d6d", box=box.ROUNDED),
-    }
+        # Nội dung bên trong mỗi Panel - format giống ảnh
+        content_d = f"[bold #00ffff]Thiết bị: {total_devices}[/]"
+        content_c = f"[bold #ffd54f]Tổng Xu: {total_xu}[/]"
+        content_n = f"[bold #00ff9c]Job Done: {total_done}[/]"
+        content_x = f"[bold #ff4d6d]Job Fail: {total_fail}[/]"
 
-    stats_grid = Table.grid(expand=True)
-    stats_grid.add_row(*[panels[k] for k in order if k in panels])
+        # Tạo 4 Panel riêng biệt, title là chữ D, C, N, X
+        panel_d = Panel(content_d, title="[bold #00ffff]D[/]", title_align="center", border_style="#00ffff", padding=(0, 2))
+        panel_c = Panel(content_c, title="[bold #ffd54f]C[/]", title_align="center", border_style="#ffd54f", padding=(0, 2))
+        panel_n = Panel(content_n, title="[bold #00ff9c]N[/]", title_align="center", border_style="#00ff9c", padding=(0, 2))
+        panel_x = Panel(content_x, title="[bold #ff4d6d]X[/]", title_align="center", border_style="#ff4d6d", padding=(0, 2))
+
+    # Grid 4 cột đều nhau
+    stats_grid = Table.grid(expand=False)
+    stats_grid.add_column(width=60)
+    stats_grid.add_column(width=17)  # D - hẹp nhất
+    stats_grid.add_column(width=17)  # N
+    stats_grid.add_column(width=17)  # X
+    stats_grid.add_row(panel_c, panel_d, panel_n, panel_x)
 
     layout["stats"].update(Align(stats_grid, align=align_stats))
-    
-    # Table với viền animation
+
     table = build_dashboard_table(animator)
     layout["table"].update(table)
     layout["gap_bottom"].update("")
