@@ -785,18 +785,11 @@ class TikTokBot:
         try:
             if not self._check_and_reconnect_adb():
                 return False
-            cmd = f'am start -a android.intent.action.VIEW -d "{link}" {TIKTOK_PACKAGE}'
-            self.device.shell(cmd)
-            launched = wait_tiktok_ui_smart(self.device, timeout=8)
+            # Sử dụng open_url của uiautomator2 giúp giảm thiểu việc bị TikTok quét bot detection
+            self.device.open_url(link)
+            launched = wait_tiktok_ui_smart(self.device, timeout=10)
             return launched
         except Exception:
-            if self._check_and_reconnect_adb():
-                try:
-                    cmd = f'am start -a android.intent.action.VIEW -d "{link}" {TIKTOK_PACKAGE}'
-                    self.device.shell(cmd)
-                    return wait_tiktok_ui_smart(self.device, timeout=8)
-                except:
-                    pass
             return False
     
     def _delay_countdown(self, delay_seconds, msg_prefix="Đang chờ"):
@@ -2788,4 +2781,4 @@ if __name__ == "__main__":
             set_stop_all()
 
             for future in futures:
-                future.cancel()
+                future.cancel().cancel()
