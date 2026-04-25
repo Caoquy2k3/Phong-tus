@@ -30,37 +30,30 @@ import signal
 import gc
 from collections import deque
 from math import sin, cos, pi
-import dns.resolver  # Thêm import DNS resolver
+import dns.resolver
 
 # ==================== CẤU HÌNH DNS RESOLVER TÙY CHỈNH ====================
 def get_custom_resolver():
-    """
-    Tạo DNS resolver tùy chỉnh với nameservers Google và Cloudflare
-    """
     resolver = dns.resolver.Resolver(configure=False)
     resolver.nameservers = ["8.8.8.8", "1.1.1.1"]
     resolver.timeout = 5
     resolver.lifetime = 10
     return resolver
 
-# Patch cho requests để sử dụng DNS resolver tùy chỉnh
 class CustomDNSAdapter(requests.adapters.HTTPAdapter):
-    """HTTP Adapter với DNS resolver tùy chỉnh"""
     def __init__(self, resolver=None, *args, **kwargs):
         self.resolver = resolver or get_custom_resolver()
         super().__init__(*args, **kwargs)
     
     def get_connection(self, url, proxies=None):
         from urllib3.util.connection import create_connection
-        from urllib3.connection import HTTPConnection, HTTPSConnection
-        import socket
+        import urllib3.util.connection as urllib3_conn
         
         original_create_connection = create_connection
         
         def custom_create_connection(address, *args, **kwargs):
             host, port = address
             try:
-                # Sử dụng DNS resolver tùy chỉnh
                 answers = self.resolver.resolve(host, 'A')
                 if answers:
                     ip = str(answers[0])
@@ -69,8 +62,6 @@ class CustomDNSAdapter(requests.adapters.HTTPAdapter):
                 pass
             return original_create_connection(address, *args, **kwargs)
         
-        # Tạm thời patch create_connection
-        import urllib3.util.connection as urllib3_conn
         original = urllib3_conn.create_connection
         urllib3_conn.create_connection = custom_create_connection
         
@@ -80,9 +71,6 @@ class CustomDNSAdapter(requests.adapters.HTTPAdapter):
             urllib3_conn.create_connection = original
 
 def patch_session_with_custom_dns(session):
-    """
-    Patch session để sử dụng DNS resolver tùy chỉnh
-    """
     try:
         adapter = CustomDNSAdapter()
         session.mount('https://', adapter)
@@ -101,7 +89,7 @@ VN_TZ = timezone(timedelta(hours=7))
 def get_vn_time():
     return datetime.now(VN_TZ)
 
-# ==================== CẤU HÌNH TOÀN CỤC (CHỈ HẰNG SỐ, KHÔNG TÀI NGUYÊN) ====================
+# ==================== CẤU HÌNH TOÀN CỤC ====================
 DATA_DIR = "data"
 os.makedirs(DATA_DIR, exist_ok=True)
 
@@ -123,10 +111,10 @@ DEFAULT_DELAY_CONFIG = {
     'loc_follow': 0,
     'nuoi_nick': 2,
     'share_rate': 15,
-    'follow_via_search': 0  # 0 = OFF (follow thuong), 1 = ON (follow qua tim kiem)
+    'follow_via_search': 0
 }
 
-# ==================== DASHBOARD TOÀN CỤC (CHỈ HIỂN THỊ) ====================
+# ==================== DASHBOARD TOÀN CỤC ====================
 console = Console()
 accounts_data = {}
 dashboard_lock = threading.RLock()
@@ -150,11 +138,6 @@ def is_stop_all():
 
 # ==================== ANIMATION BORDER HIGHLIGHT ====================
 class BorderAnimator:
-    """
-    Quản lý hiệu ứng highlight chạy quanh viền box
-    Không dùng global, state riêng cho UI thread
-    """
-    
     def __init__(self, width=80, height=20):
         self.width = width
         self.height = height
@@ -163,7 +146,6 @@ class BorderAnimator:
         self.frame_count = 0
         self.speed = 1
         self.tail_length = 2
-        
         self.hue_offset = 0
         
     def update(self):
@@ -173,7 +155,6 @@ class BorderAnimator:
     
     def get_position_info(self, perimeter_pos):
         w, h = self.width, self.height
-        
         if perimeter_pos < w:
             return 'top', perimeter_pos, w, h
         elif perimeter_pos < w + h:
@@ -185,35 +166,28 @@ class BorderAnimator:
     
     def is_highlight_position(self, edge, edge_index):
         current_edge, current_edge_pos, _, _ = self.get_position_info(self.pos)
-        
         if current_edge == edge and current_edge_pos == edge_index:
             return True
-        
         for tail_offset in range(1, self.tail_length + 1):
             tail_pos = (self.pos - tail_offset) % self.perimeter
             tail_edge, tail_edge_pos, _, _ = self.get_position_info(tail_pos)
             if tail_edge == edge and tail_edge_pos == edge_index:
                 return True
-        
         return False
     
     def get_brightness_for_position(self, edge, edge_index):
         current_edge, current_edge_pos, _, _ = self.get_position_info(self.pos)
-        
         if current_edge == edge and current_edge_pos == edge_index:
             return 1.0
-        
         for tail_offset in range(1, self.tail_length + 1):
             tail_pos = (self.pos - tail_offset) % self.perimeter
             tail_edge, tail_edge_pos, _, _ = self.get_position_info(tail_pos)
             if tail_edge == edge and tail_edge_pos == edge_index:
                 return 1.0 - (tail_offset / (self.tail_length + 1))
-        
         return 0.0
     
     def get_highlight_char(self, edge_char, edge, edge_index):
         brightness = self.get_brightness_for_position(edge, edge_index)
-        
         if brightness <= 0:
             return edge_char
         
@@ -256,7 +230,6 @@ class BorderAnimator:
     def render_border_with_highlight(self, top_edge, bottom_edge, left_edge, right_edge, 
                                       top_chars, bottom_chars, left_chars, right_chars):
         result = []
-        
         top_result = []
         for i, ch in enumerate(top_chars):
             if self.is_highlight_position('top', i):
@@ -268,10 +241,8 @@ class BorderAnimator:
         for i in range(len(left_chars)):
             left_char = left_chars[i]
             right_char = right_chars[i]
-            
             left_highlighted = self.get_highlight_char(left_char, 'left', i) if self.is_highlight_position('left', i) else left_char
             right_highlighted = self.get_highlight_char(right_char, 'right', i) if self.is_highlight_position('right', i) else right_char
-            
             result.append(f"{left_highlighted}{' ' * (len(top_chars) - 2)}{right_highlighted}")
         
         bottom_result = []
@@ -281,11 +252,9 @@ class BorderAnimator:
             else:
                 bottom_result.append(ch)
         result.append(''.join(bottom_result))
-        
         return '\n'.join(result)
 
 
-# ==================== CUSTOM BOX VỚI ANIMATION ====================
 class AnimatedBox:
     def __init__(self, border_animator):
         self.animator = border_animator
@@ -332,13 +301,11 @@ def get_tiktok_version_from_device(device_obj, serial=None):
             match = re.search(r'versionName=([\d.]+)', result)
             if match:
                 return match.group(1)
-        
         result = device_obj.shell("pm list packages --show-version-code com.ss.android.ugc.trill")
         if result and result.strip():
             match = re.search(r'versionCode=(\d+)', result)
             if match:
                 return match.group(1)
-        
         return None
     except Exception:
         return None
@@ -356,11 +323,9 @@ def get_all_devices_versions(devices_list):
     return versions
 
 
-# ==================== HÀM CHỜ UI THÔNG MINH ====================
 def wait_tiktok_ui_smart(device, timeout=40):
     start_time = time.time()
     interval = 0.25
-    
     while time.time() - start_time < timeout:
         try:
             current = device.app_current()
@@ -369,7 +334,6 @@ def wait_tiktok_ui_smart(device, timeout=40):
         except Exception:
             pass
         time.sleep(interval)
-    
     return False
 
 
@@ -377,7 +341,6 @@ def wait_ui_stable_after_action(device, timeout=3):
     time.sleep(0.3)
     start_time = time.time()
     interval = 0.25
-    
     while time.time() - start_time < timeout:
         try:
             current = device.app_current()
@@ -386,7 +349,6 @@ def wait_ui_stable_after_action(device, timeout=3):
         except:
             pass
         time.sleep(interval)
-    
     return True
 
 
@@ -404,65 +366,41 @@ def force_restart_tiktok(device):
         pass
 
 
-# ==================== HÀM TÌM ICON SEARCH (CẬP NHẬT MỚI) ====================
 def click_search_icon(d):
-    """
-    Tìm và click icon search 🔍 bằng XML
-    Trả về True nếu thành công, False nếu thất bại
-    """
     for _ in range(5):
         try:
             xml = d.dump_hierarchy()
-
             nodes = re.findall(
                 r'<node[^>]*class="android\.widget\.ImageView"[^>]*content-desc="([^"]*)"[^>]*bounds="(\[\d+,\d+\]\[\d+,\d+\])"',
                 xml
             )
-
             w, h = d.window_size()
-
             for desc, bounds in nodes:
                 if desc not in ["Tìm kiếm", "Search"]:
                     continue
-
                 nums = list(map(int, re.findall(r'\d+', bounds)))
                 if len(nums) >= 4:
                     x1, y1, x2, y2 = nums[:4]
-
-                    # chỉ lấy icon góc phải trên
                     if y2 < h * 0.18 and x1 > w * 0.6:
                         x = (x1 + x2) // 2
                         y = (y1 + y2) // 2
-
                         d.click(x, y)
                         time.sleep(1)
-
                         if d(className="android.widget.EditText").exists:
                             return True
-
             time.sleep(0.5)
-
         except Exception:
             pass
-
     return False
 
 
-# ==================== HÀM GÕ TEXT TỪ TỪ ====================
 def type_text_slow(d, text):
-    """
-    Gõ text từng ký tự một
-    """
     for ch in text:
         d.send_keys(ch)
         time.sleep(0.05)
 
 
-# ==================== HÀM CHỜ SEARCH UI ====================
 def wait_search_ui(d, timeout=6):
-    """
-    Chờ UI tìm kiếm xuất hiện
-    """
     start = time.time()
     while time.time() - start < timeout:
         try:
@@ -474,25 +412,12 @@ def wait_search_ui(d, timeout=6):
     return False
 
 
-# ==================== HÀM VUỐT XUỐNG (THÊM MỚI) ====================
 def swipe_down_from_point_little(device, x, y, screen_height, distance_ratio=0.3, duration=400):
-    """
-    Thực hiện vuốt xuống: Ngón tay di chuyển từ điểm (x, y) xuống phía dưới màn hình
-    """
-    # Tính toán khoảng cách vuốt dựa trên tỷ lệ màn hình (mặc định 30% chiều cao)
     distance = int(screen_height * distance_ratio)
-    
-    # VUỐT XUỐNG: Tọa độ y kết thúc phải lớn hơn tọa độ y bắt đầu
     y_end = min(screen_height - 10, y + distance)
-    
-    # Thực hiện lệnh swipe qua shell để giả lập mượt mà nhất
     device.shell(f"input swipe {x} {y} {x} {y_end} {duration}")
 
 def checknha(device, x, y):
-    """
-    Hàm bổ trợ để lấy kích thước màn hình và thực hiện vuốt
-    """
-    # Lấy size màn hình thực tế từ thiết bị
     w, h = device.window_size()
     swipe_down_from_point_little(device, x, y, h)
 
@@ -516,7 +441,6 @@ class TikTokBot:
         self.device = None
         self.session = requests.Session()
         
-        # Áp dụng DNS resolver tùy chỉnh cho session
         patch_session_with_custom_dns(self.session)
         
         adapter = requests.adapters.HTTPAdapter(
@@ -575,28 +499,18 @@ class TikTokBot:
 
         self._init_instance_files()
 
-    # ==================== HÀM VUỐT GẮN CỨNG (THÊM VÀO CLASS) ====================
     def swipe_down_from_point_little(self, x, y, distance_ratio=0.3, duration=400):
-        """
-        Thực hiện vuốt xuống: Ngón tay di chuyển từ điểm (x, y) xuống phía dưới màn hình
-        """
         if not self.device:
             return
         try:
             w, h = self.device.window_size()
-            # Tính toán khoảng cách vuốt dựa trên tỷ lệ màn hình (mặc định 30% chiều cao)
             distance = int(h * distance_ratio)
-            # VUỐT XUỐNG: Tọa độ y kết thúc phải lớn hơn tọa độ y bắt đầu
             y_end = min(h - 10, y + distance)
-            # Thực hiện lệnh swipe qua shell để giả lập mượt mà nhất
             self.device.shell(f"input swipe {x} {y} {x} {y_end} {duration}")
         except Exception:
             pass
     
     def checknha(self, x, y):
-        """
-        Hàm bổ trợ để thực hiện vuốt
-        """
         self.swipe_down_from_point_little(x, y)
 
     def ensure_device(self):
@@ -878,9 +792,11 @@ class TikTokBot:
             pass
     
     def _check_app_status(self):
+        """Kiểm tra app có đang chạy không, nếu không thì mở lại"""
         try:
             current = self.device.app_current()
             if current.get("package") != TIKTOK_PACKAGE:
+                self._add_response_message("Phát hiện thoát app, đang mở lại TikTok")
                 self.device.app_start(TIKTOK_PACKAGE)
                 wait_tiktok_ui_smart(self.device, timeout=10)
                 return False
@@ -1078,7 +994,7 @@ class TikTokBot:
                 time.sleep(1)
             return delay_seconds
     
-    # ========== FOLLOW QUA TÌM KIẾM (TÁCH RIÊNG) ==========
+    # ========== FOLLOW QUA TÌM KIẾM (TÁCH RIÊNG - KHÔNG BANK THOÁT APP) ==========
     
     def _extract_username_from_link(self, link):
         try:
@@ -1090,28 +1006,20 @@ class TikTokBot:
             return None
     
     def _click_search_icon(self):
-        """Tìm và click icon search sử dụng hàm click_search_icon"""
         return click_search_icon(self.device)
     
     def _wait_search_ui(self, timeout=6):
-        """Chờ UI tìm kiếm xuất hiện"""
         return wait_search_ui(self.device, timeout)
     
     def _type_text_slow(self, text):
-        """Paste text thay vì gõ từng ký tự"""
         try:
-            # set clipboard
             self.device.set_clipboard(text)
-            time.sleep(0.05) 
-
-            # paste
+            time.sleep(0.05)
             self.device.press("paste")
-
         except Exception:
             pass
     
     def _search_username(self, username):
-        """Tìm kiếm username"""
         try:
             search_input = self.device(className="android.widget.EditText")
             if not search_input.exists:
@@ -1128,8 +1036,7 @@ class TikTokBot:
             except:
                 pass
         
-            # Fix: nhập nhanh thay vì gõ từng chữ
-            search_input.set_text(username)  # hoặc search_input.send_keys(username)
+            search_input.set_text(username)
         
             time.sleep(0.1)
             self.device.press("enter")
@@ -1174,15 +1081,15 @@ class TikTokBot:
                         self._add_response_message(f"Đã nhấn Follow @{username}", "follow")
                         return True
         
-            # Không tìm thấy -> bỏ qua, không báo lỗi
             self._add_response_message(f"Không tìm thấy nút Follow cho @{username}, bỏ qua", "follow")
-            return True  # Trả về True để tiếp tục
+            return True
         
         except Exception as e:
             self._add_response_message(f"Lỗi khi tìm Follow: {str(e)[:50]}, bỏ qua", "follow")
-            return True  # Trả về True để không dừng chương trình
+            return True
     
-    def _cleanup_search_ui(self):
+    def _go_back_to_home(self):
+        """Chỉ dùng để quay về Home, KHÔNG thoát app"""
         try:
             for _ in range(2):
                 self.device.press("back")
@@ -1192,17 +1099,16 @@ class TikTokBot:
                 home_tab = self.device(text="Home", resourceIdMatches=".*tab.*")
                 if home_tab.exists:
                     home_tab.click()
+                    time.sleep(0.5)
             except:
                 pass
-                
         except Exception:
             pass
     
     def do_follow_via_search(self, link):
         """
-        Follow qua tìm kiếm - TÁCH RIÊNG HOÀN TOÀN
+        Follow qua tìm kiếm - KHÔNG dùng lệnh bank thoát app
         CHỈ được gọi khi follow_via_search == 1
-        KHÔNG fallback sang follow thường
         """
         if not self.device:
             self._add_response_message("[Follow Search] Device không khả dụng", "follow")
@@ -1220,45 +1126,40 @@ class TikTokBot:
         self._add_response_message(f"[Follow Search] Bắt đầu tìm kiếm và follow @{username}", "follow")
 
         try:
-            for _ in range(1):
-                self.device.press("back")
-                time.sleep(0.3)
+            # Quay về Home (CHỈ 2 lần back, không thoát app)
+            self._go_back_to_home()
 
-            try:
-                home_tab = self.device(text="Home", resourceIdMatches=".*tab.*")
-                if home_tab.exists:
-                    home_tab.click()
-                    time.sleep(1)
-            except:
-                pass
+            # Kiểm tra app có đang chạy không
+            self._check_app_status()
 
-            # Sử dụng hàm click_search_icon mới
+            # Tìm icon search
             if not self._click_search_icon():
                 self._add_response_message("[Follow Search] Không tìm thấy icon tìm kiếm", "follow")
-                self._cleanup_search_ui()
+                self._go_back_to_home()
                 return False
             
-            # Chờ UI tìm kiếm xuất hiện
+            # Chờ UI tìm kiếm
             if not self._wait_search_ui(timeout=6):
                 self._add_response_message("[Follow Search] Không chờ được UI tìm kiếm", "follow")
-                self._cleanup_search_ui()
+                self._go_back_to_home()
                 return False
             
             if not self._search_username(username):
                 self._add_response_message("[Follow Search] Không thể nhập username", "follow")
-                self._cleanup_search_ui()
+                self._go_back_to_home()
                 return False
             time.sleep(2)
 
             if not self._switch_to_users_tab():
                 self._add_response_message("[Follow Search] Không tìm thấy tab Người dùng", "follow")
-                self._cleanup_search_ui()
+                self._go_back_to_home()
                 return False
             time.sleep(1.5)
 
             follow_success = self._find_and_click_follow_in_search_results(username)
 
-            self._cleanup_search_ui()
+            # Quay về Home sau khi follow xong (KHÔNG thoát app)
+            self._go_back_to_home()
 
             if follow_success:
                 self._add_response_message(f"[Follow Search] Follow @{username} thành công!", "follow")
@@ -1269,29 +1170,16 @@ class TikTokBot:
 
         except Exception as e:
             self._add_response_message(f"[Follow Search] Lỗi: {str(e)[:50]}", "follow")
-            self._cleanup_search_ui()
+            try:
+                self._go_back_to_home()
+            except:
+                pass
             return False
 
-    # ========== FOLLOW THÔNG THƯỜNG (ĐÃ THÊM VUỐT SAU KHI FOLLOW) ==========
+    # ========== FOLLOW QUA LINK (GIỮ NGUYÊN CODE CŨ) ==========
     
-    def do_follow(self, max_retry=3, link=None):
-        """
-        Follow - TÁCH RIÊNG HOÀN TOÀN
-        follow_via_search = 1: CHỈ dùng follow qua tìm kiếm
-        follow_via_search = 0: CHỈ dùng follow thông thường (code cũ)
-        KHÔNG BAO GIỜ CHẠY CẢ 2
-        """
-        follow_via_search = self.delay_config.get('follow_via_search', 0)
-        
-        # ===== CHẾ ĐỘ FOLLOW QUA TÌM KIẾM (TÁCH RIÊNG) =====
-        if follow_via_search == 1:
-            if not link:
-                self._add_response_message("[Follow Search] Không có link để follow", "follow")
-                return False
-            # CHỈ gọi method follow qua tìm kiếm, KHÔNG fallback
-            return self.do_follow_via_search(link)
-        
-        # ===== CHẾ ĐỘ FOLLOW THÔNG THƯỜNG (GIỮ NGUYÊN CODE CŨ + THÊM VUỐT) =====
+    def do_follow_via_link(self, max_retry=3):
+        """Follow qua link - GIỮ NGUYÊN CODE CŨ, không sửa gì"""
         if not self.device:
             return False
 
@@ -1336,21 +1224,16 @@ class TikTokBot:
                             
                             if verified:
                                 self._add_response_message("Follow thành công", "follow")
-                                
-                                # ===== GẮN CỨNG VUỐT SAU MỖI FOLLOW THÀNH CÔNG =====
                                 try:
                                     w, h = self.device.window_size()
-                                    # Lấy tọa độ ngẫu nhiên ở vùng giữa màn hình
                                     random_x = random.randint(int(w * 0.2), int(w * 0.8))
                                     random_y = random.randint(int(h * 0.3), int(h * 0.7))
                                     self.checknha(random_x, random_y)
                                     self._add_response_message("Đã vuốt xuống sau follow", "follow")
                                 except Exception as e:
                                     self._add_response_message(f"Vuốt sau follow lỗi: {str(e)[:30]}", "follow")
-                                
                                 return True
                             else:
-                                # Thành công nhưng không verify được vẫn vuốt
                                 try:
                                     w, h = self.device.window_size()
                                     random_x = random.randint(int(w * 0.2), int(w * 0.8))
@@ -1368,6 +1251,24 @@ class TikTokBot:
                 
         except Exception:
             return False
+
+    def do_follow(self, max_retry=3, link=None):
+        """
+        Follow - Điều hướng dựa trên follow_via_search
+        follow_via_search = 1: CHỈ dùng follow qua tìm kiếm
+        follow_via_search = 0: CHỈ dùng follow qua link (code cũ)
+        """
+        follow_via_search = self.delay_config.get('follow_via_search', 0)
+        
+        if follow_via_search == 1:
+            if not link:
+                self._add_response_message("[Follow Search] Không có link để follow", "follow")
+                return False
+            return self.do_follow_via_search(link)
+        else:
+            return self.do_follow_via_link(max_retry)
+    
+    # ========== LIKE (KHÔNG DÙNG LỆNH BANK) ==========
     
     def _is_like_node(self, node):
         res_id = node.get("resource-id", "")
@@ -1404,11 +1305,15 @@ class TikTokBot:
         return candidates[0][0]
     
     def do_like(self, max_retry=8):
+        """Like - KHÔNG dùng lệnh bank, KHÔNG thoát app"""
         if not self.device:
             return False
 
         if self.stop_flag or is_stop_all():
             return False
+        
+        # Kiểm tra app có đang chạy không
+        self._check_app_status()
         
         self._add_response_message("Đang làm nhiệm vụ Like", "like")
         clicked = False
@@ -1456,12 +1361,18 @@ class TikTokBot:
         self._add_response_message("Like thất bại", "like")
         return False
     
+    # ========== FAVORITE (KHÔNG DÙNG LỆNH BANK) ==========
+    
     def do_favorite(self, max_retry=5):
+        """Favorite - KHÔNG dùng lệnh bank, KHÔNG thoát app"""
         if not self.device:
             return False
 
         if self.stop_flag or is_stop_all():
             return False
+        
+        # Kiểm tra app có đang chạy không
+        self._check_app_status()
         
         try:
             fav_identifiers = {
@@ -1503,7 +1414,7 @@ class TikTokBot:
         except Exception:
             return False
     
-    # ========== COMMENT ==========
+    # ========== COMMENT (GIỮ NGUYÊN) ==========
     
     def _get_comment_text_from_job(self, job_data):
         try:
@@ -1539,7 +1450,6 @@ class TikTokBot:
             input_box.click()
             time.sleep(1)
             
-            # Sử dụng gõ text từng ký tự cho comment
             self._type_text_slow(comment_text)
             time.sleep(0.5)
             
@@ -1572,7 +1482,7 @@ class TikTokBot:
                 pass
             return False
     
-    # ========== API GOLIKE - LẤY RESPONSE THẬT ==========
+    # ========== API GOLIKE ==========
     
     def _parse_api_response(self, response, func_name="api_call"):
         result = {
@@ -2149,7 +2059,7 @@ class TikTokBot:
         self._add_response_message(" Bot đã dừng")
 
 
-# ==================== CÁC HÀM HỖ TRỢ ====================
+# ==================== CÁC HÀM HỖ TRỢ (GIỮ NGUYÊN) ====================
 
 def banner():
     os.system('clear' if os.name == 'posix' else 'cls')
@@ -2165,7 +2075,7 @@ def banner():
       \033[38;2;120;255;230m            ░           ░                  ░ ░      ░ ░      ░  ░
 \033[0m
 
-\033[38;2;255;200;140m[</>] \033[38;2;200;160;255mADMIN: NHƯ ANH ĐÃ THẤY EM   \033[38;2;255;220;160mPhiên Bản: \033[38;2;120;255;220mv3.21
+\033[38;2;255;200;140m[</>] \033[38;2;200;160;255mADMIN: NHƯ ANH ĐÃ THẤY EM   \033[38;2;255;220;160mPhiên Bản: \033[38;2;120;255;220mv3.22
 \033[38;2;255;200;140m[</>] \033[38;2;200;160;255mNhóm Telegram: \033[38;2;120;255;220mhttps://t.me/se_meo_bao_an
 \033[38;2;190;235;210m───────────────────────────────────────────────────────────────────────\033[0m
 """
@@ -2685,7 +2595,6 @@ def display_auth_menu():
             sys.exit(1)
     
     session = requests.Session()
-    # Áp dụng DNS resolver cho session
     patch_session_with_custom_dns(session)
     
     for token in auth_tokens:
