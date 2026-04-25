@@ -30,6 +30,66 @@ import signal
 import gc
 from collections import deque
 from math import sin, cos, pi
+import dns.resolver  # Thêm import DNS resolver
+
+# ==================== CẤU HÌNH DNS RESOLVER TÙY CHỈNH ====================
+def get_custom_resolver():
+    """
+    Tạo DNS resolver tùy chỉnh với nameservers Google và Cloudflare
+    """
+    resolver = dns.resolver.Resolver(configure=False)
+    resolver.nameservers = ["8.8.8.8", "1.1.1.1"]
+    resolver.timeout = 5
+    resolver.lifetime = 10
+    return resolver
+
+# Patch cho requests để sử dụng DNS resolver tùy chỉnh
+class CustomDNSAdapter(requests.adapters.HTTPAdapter):
+    """HTTP Adapter với DNS resolver tùy chỉnh"""
+    def __init__(self, resolver=None, *args, **kwargs):
+        self.resolver = resolver or get_custom_resolver()
+        super().__init__(*args, **kwargs)
+    
+    def get_connection(self, url, proxies=None):
+        from urllib3.util.connection import create_connection
+        from urllib3.connection import HTTPConnection, HTTPSConnection
+        import socket
+        
+        original_create_connection = create_connection
+        
+        def custom_create_connection(address, *args, **kwargs):
+            host, port = address
+            try:
+                # Sử dụng DNS resolver tùy chỉnh
+                answers = self.resolver.resolve(host, 'A')
+                if answers:
+                    ip = str(answers[0])
+                    return original_create_connection((ip, port), *args, **kwargs)
+            except Exception:
+                pass
+            return original_create_connection(address, *args, **kwargs)
+        
+        # Tạm thời patch create_connection
+        import urllib3.util.connection as urllib3_conn
+        original = urllib3_conn.create_connection
+        urllib3_conn.create_connection = custom_create_connection
+        
+        try:
+            return super().get_connection(url, proxies)
+        finally:
+            urllib3_conn.create_connection = original
+
+def patch_session_with_custom_dns(session):
+    """
+    Patch session để sử dụng DNS resolver tùy chỉnh
+    """
+    try:
+        adapter = CustomDNSAdapter()
+        session.mount('https://', adapter)
+        session.mount('http://', adapter)
+        return True
+    except Exception:
+        return False
 
 # ==================== CẤU HÌNH MÚI GIỜ VIỆT NAM CHUẨN ====================
 os.environ['TZ'] = 'Asia/Ho_Chi_Minh'
@@ -414,6 +474,29 @@ def wait_search_ui(d, timeout=6):
     return False
 
 
+# ==================== HÀM VUỐT XUỐNG (THÊM MỚI) ====================
+def swipe_down_from_point_little(device, x, y, screen_height, distance_ratio=0.3, duration=400):
+    """
+    Thực hiện vuốt xuống: Ngón tay di chuyển từ điểm (x, y) xuống phía dưới màn hình
+    """
+    # Tính toán khoảng cách vuốt dựa trên tỷ lệ màn hình (mặc định 30% chiều cao)
+    distance = int(screen_height * distance_ratio)
+    
+    # VUỐT XUỐNG: Tọa độ y kết thúc phải lớn hơn tọa độ y bắt đầu
+    y_end = min(screen_height - 10, y + distance)
+    
+    # Thực hiện lệnh swipe qua shell để giả lập mượt mà nhất
+    device.shell(f"input swipe {x} {y} {x} {y_end} {duration}")
+
+def checknha(device, x, y):
+    """
+    Hàm bổ trợ để lấy kích thước màn hình và thực hiện vuốt
+    """
+    # Lấy size màn hình thực tế từ thiết bị
+    w, h = device.window_size()
+    swipe_down_from_point_little(device, x, y, h)
+
+
 class TikTokBot:
     def __init__(self, serial, auth_token, golike_username, account_id_val,
                  delay_config, lam, force_stop_enabled, force_stop_after,
@@ -432,6 +515,10 @@ class TikTokBot:
         
         self.device = None
         self.session = requests.Session()
+        
+        # Áp dụng DNS resolver tùy chỉnh cho session
+        patch_session_with_custom_dns(self.session)
+        
         adapter = requests.adapters.HTTPAdapter(
             pool_connections=5,
             pool_maxsize=10,
@@ -487,6 +574,30 @@ class TikTokBot:
         self.tiktok_version = None
 
         self._init_instance_files()
+
+    # ==================== HÀM VUỐT GẮN CỨNG (THÊM VÀO CLASS) ====================
+    def swipe_down_from_point_little(self, x, y, distance_ratio=0.3, duration=400):
+        """
+        Thực hiện vuốt xuống: Ngón tay di chuyển từ điểm (x, y) xuống phía dưới màn hình
+        """
+        if not self.device:
+            return
+        try:
+            w, h = self.device.window_size()
+            # Tính toán khoảng cách vuốt dựa trên tỷ lệ màn hình (mặc định 30% chiều cao)
+            distance = int(h * distance_ratio)
+            # VUỐT XUỐNG: Tọa độ y kết thúc phải lớn hơn tọa độ y bắt đầu
+            y_end = min(h - 10, y + distance)
+            # Thực hiện lệnh swipe qua shell để giả lập mượt mà nhất
+            self.device.shell(f"input swipe {x} {y} {x} {y_end} {duration}")
+        except Exception:
+            pass
+    
+    def checknha(self, x, y):
+        """
+        Hàm bổ trợ để thực hiện vuốt
+        """
+        self.swipe_down_from_point_little(x, y)
 
     def ensure_device(self):
         try:
@@ -1160,7 +1271,7 @@ class TikTokBot:
             self._cleanup_search_ui()
             return False
 
-    # ========== FOLLOW THÔNG THƯỜNG (GIỮ NGUYÊN) ==========
+    # ========== FOLLOW THÔNG THƯỜNG (ĐÃ THÊM VUỐT SAU KHI FOLLOW) ==========
     
     def do_follow(self, max_retry=3, link=None):
         """
@@ -1179,7 +1290,7 @@ class TikTokBot:
             # CHỈ gọi method follow qua tìm kiếm, KHÔNG fallback
             return self.do_follow_via_search(link)
         
-        # ===== CHẾ ĐỘ FOLLOW THÔNG THƯỜNG (GIỮ NGUYÊN CODE CŨ) =====
+        # ===== CHẾ ĐỘ FOLLOW THÔNG THƯỜNG (GIỮ NGUYÊN CODE CŨ + THÊM VUỐT) =====
         if not self.device:
             return False
 
@@ -1224,8 +1335,28 @@ class TikTokBot:
                             
                             if verified:
                                 self._add_response_message("Follow thành công", "follow")
+                                
+                                # ===== GẮN CỨNG VUỐT SAU MỖI FOLLOW THÀNH CÔNG =====
+                                try:
+                                    w, h = self.device.window_size()
+                                    # Lấy tọa độ ngẫu nhiên ở vùng giữa màn hình
+                                    random_x = random.randint(int(w * 0.2), int(w * 0.8))
+                                    random_y = random.randint(int(h * 0.3), int(h * 0.7))
+                                    self.checknha(random_x, random_y)
+                                    self._add_response_message("Đã vuốt xuống sau follow", "follow")
+                                except Exception as e:
+                                    self._add_response_message(f"Vuốt sau follow lỗi: {str(e)[:30]}", "follow")
+                                
                                 return True
                             else:
+                                # Thành công nhưng không verify được vẫn vuốt
+                                try:
+                                    w, h = self.device.window_size()
+                                    random_x = random.randint(int(w * 0.2), int(w * 0.8))
+                                    random_y = random.randint(int(h * 0.3), int(h * 0.7))
+                                    self.checknha(random_x, random_y)
+                                except:
+                                    pass
                                 self._add_response_message("Follow thành công", "follow")
                                 return True
                 
@@ -2553,6 +2684,9 @@ def display_auth_menu():
             sys.exit(1)
     
     session = requests.Session()
+    # Áp dụng DNS resolver cho session
+    patch_session_with_custom_dns(session)
+    
     for token in auth_tokens:
         result = get_user_me(token, session)
         accounts.append(result)
@@ -2612,6 +2746,7 @@ def display_auth_menu():
         
         console.print(u" Đang kiểm tra Authorization")
         session = requests.Session()
+        patch_session_with_custom_dns(session)
         result = get_user_me(new_auth, session)
         
         if result.get("success"):
@@ -2665,7 +2800,7 @@ def build_dashboard_table(animator=None):
     table.add_column("Type", justify="center", style="#38bdf8", width=8)
     table.add_column("Xu", justify="center", width=5)
     table.add_column("Tổng", justify="center", style="#facc15", width=6)
-    table.add_column("Done", style="magenta", width=7)
+    table.add_column("Done", style="magenta", width=6)
     table.add_column("Message", style="#ffffff", width=62)
     with dashboard_lock:
         devices_list = []
