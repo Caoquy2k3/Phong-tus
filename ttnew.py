@@ -1102,7 +1102,7 @@ class TikTokBot:
         try:
             # set clipboard
             self.device.set_clipboard(text)
-            time.sleep(0.02)
+            time.sleep(0.05) 
 
             # paste
             self.device.press("paste")
