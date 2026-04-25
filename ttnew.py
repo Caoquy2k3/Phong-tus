@@ -1098,34 +1098,43 @@ class TikTokBot:
         return wait_search_ui(self.device, timeout)
     
     def _type_text_slow(self, text):
-        """Gõ text từng ký tự"""
-        type_text_slow(self.device, text)
+        """Paste text thay vì gõ từng ký tự"""
+        try:
+            # set clipboard
+            self.device.set_clipboard(text)
+            time.sleep(0.02)
+
+            # paste
+            self.device.press("paste")
+
+        except Exception:
+            pass
     
     def _search_username(self, username):
         """Tìm kiếm username"""
         try:
             search_input = self.device(className="android.widget.EditText")
             if not search_input.exists:
-                search_input = self.device(resourceIdMatches=".*search.*input.*")
-            
+                search_input = self.device(resourceIdMatches=".*search.input.")
+        
             if not search_input.exists:
                 return False
-            
+        
             search_input.click()
-            time.sleep(0.5)
-            
+            time.sleep(0.1)
+        
             try:
                 search_input.clear_text()
             except:
                 pass
-            
-            # Sử dụng gõ text từng ký tự
-            self._type_text_slow(username)
-            time.sleep(0.5)
-            
+        
+            # Fix: nhập nhanh thay vì gõ từng chữ
+            search_input.set_text(username)  # hoặc search_input.send_keys(username)
+        
+            time.sleep(0.1)
             self.device.press("enter")
             return True
-            
+        
         except Exception:
             return False
     
@@ -1149,37 +1158,29 @@ class TikTokBot:
     
     def _find_and_click_follow_in_search_results(self, username):
         try:
-            max_scroll = 5
-            scroll_count = 0
+            nodes = self._dump_ui_nodes()
+        
+            for node in nodes:
+                text = node.get("text", "").strip().lower()
+                res_id = node.get("resource-id", "")
             
-            while scroll_count < max_scroll and not self.stop_flag and not is_stop_all():
-                nodes = self._dump_ui_nodes()
-                
-                for node in nodes:
-                    text = node.get("text", "").strip().lower()
-                    res_id = node.get("resource-id", "")
-                    
-                    if text in ["theo dõi", "follow"] or "follow" in res_id:
-                        if "đang theo dõi" in text or "following" in text:
-                            self._add_response_message(f"Đã follow @{username} từ trước", "follow")
-                            return True
-                        
-                        if self._click_node_by_bounds(node):
-                            time.sleep(1.5)
-                            self._add_response_message(f"Đã nhấn Follow @{username}", "follow")
-                            return True
-                
-                w, h = self.device.window_size()
-                self.device.swipe(w // 2, int(h * 0.7), w // 2, int(h * 0.3), duration=0.3)
-                time.sleep(1)
-                scroll_count += 1
+                if "đang theo dõi" in text or "following" in text:
+                    self._add_response_message(f"Đã follow @{username} từ trước", "follow")
+                    return True
             
-            self._add_response_message(f"Không tìm thấy nút Follow cho @{username} trong kết quả tìm kiếm", "follow")
-            return False
-            
+                if text in ["theo dõi", "follow"] or "follow" in res_id:
+                    if self._click_node_by_bounds(node):
+                        time.sleep(1.5)
+                        self._add_response_message(f"Đã nhấn Follow @{username}", "follow")
+                        return True
+        
+            # Không tìm thấy -> bỏ qua, không báo lỗi
+            self._add_response_message(f"Không tìm thấy nút Follow cho @{username}, bỏ qua", "follow")
+            return True  # Trả về True để tiếp tục
+        
         except Exception as e:
-            self._add_response_message(f"Lỗi khi tìm Follow trong kết quả: {str(e)[:50]}", "follow")
-            return False
+            self._add_response_message(f"Lỗi khi tìm Follow: {str(e)[:50]}, bỏ qua", "follow")
+            return True  # Trả về True để không dừng chương trình
     
     def _cleanup_search_ui(self):
         try:
