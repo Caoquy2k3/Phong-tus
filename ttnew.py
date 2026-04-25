@@ -1102,7 +1102,7 @@ class TikTokBot:
         try:
             # set clipboard
             self.device.set_clipboard(text)
-            time.sleep(0.02) 
+            time.sleep(0.05) 
 
             # paste
             self.device.press("paste")
@@ -1184,7 +1184,7 @@ class TikTokBot:
     
     def _cleanup_search_ui(self):
         try:
-            for _ in range(3):
+            for _ in range(2):
                 self.device.press("back")
                 time.sleep(0.3)
             
@@ -1220,7 +1220,7 @@ class TikTokBot:
         self._add_response_message(f"[Follow Search] Bắt đầu tìm kiếm và follow @{username}", "follow")
 
         try:
-            for _ in range(2):
+            for _ in range(1):
                 self.device.press("back")
                 time.sleep(0.3)
 
