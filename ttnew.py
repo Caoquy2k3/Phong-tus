@@ -804,27 +804,63 @@ class TikTokBot:
         except Exception:
             self._restart_tiktok()
             return False
-    
+
+    # ==================== HÀM _OPEN_LINK ĐÃ CẬP NHẬT ====================
     def _open_link(self, link):
+        """Mở link TikTok - Có log debug và validation đầy đủ"""
         try:
-            if not self._check_and_reconnect_adb():
+            # 1. Kiểm tra link None/Rỗng/Format
+            if not link or not isinstance(link, str):
+                self._add_response_message(f"LỖI: Link không hợp lệ (None/Rỗng)")
                 return False
-
-            cmd = f'am start -a android.intent.action.VIEW -d "{link}" -p {TIKTOK_PACKAGE}'
+            
+            link = link.strip()
+            # 2. In debug LINK ra dashboard
+            self._add_response_message(f"DEBUG LINK: {link}")
+            
+            # 3. Kiểm tra kết nối ADB
+            if not self._check_and_reconnect_adb():
+                self._add_response_message(f"LỖI: Mất kết nối ADB với {self.serial}")
+                return False
+            
+            # 4. Kiểm tra định dạng link - phải bắt đầu bằng http
+            if not link.startswith("http"):
+                self._add_response_message(f"LỖI: Link sai định dạng http: {link[:50]}")
+                return False
+            
+            # 5. Tạo lệnh ADB mở link
+            cmd = (
+                f'am start -a android.intent.action.VIEW '
+                f'-c android.intent.category.BROWSABLE '
+                f'-d "{link}" -p {TIKTOK_PACKAGE}'
+            )
+            self._add_response_message(f"ADB CMD: {cmd[:100]}...")
+            
+            # 6. Thực thi lệnh
             self.device.shell(cmd)
-
-            return wait_tiktok_ui_smart(self.device, timeout=8)
-
-        except Exception:
-            if self._check_and_reconnect_adb():
-                try:
-                    cmd = f'am start -a android.intent.action.VIEW -d "{link}" -p {TIKTOK_PACKAGE}'
-                    self.device.shell(cmd)
-                    return wait_tiktok_ui_smart(self.device, timeout=8)
-                except:
-                    pass
+            
+            # 7. Chờ app mở và kiểm tra
+            time.sleep(5)
+            
+            # 8. Kiểm tra app sau khi mở
+            current = self.device.app_current()
+            current_pkg = current.get("package", "")
+            self._add_response_message(f"CURRENT APP: {current_pkg}")
+            
+            if current_pkg == TIKTOK_PACKAGE:
+                self._add_response_message(f" Mở link thành công: {link[:80]}")
+                return True
+            else:
+                self._add_response_message(f" Mở link thất bại. App hiện tại: {current_pkg}")
+                # Thử mở lại TikTok
+                self.device.app_start(TIKTOK_PACKAGE)
+                wait_tiktok_ui_smart(self.device, timeout=8)
+                return False
+                
+        except Exception as e:
+            self._add_response_message(f" Lỗi hệ thống mở link: {str(e)[:80]}")
             return False
-    
+
     def _delay_countdown(self, delay_seconds, msg_prefix="Đang chờ"):
         delay_seconds = min(delay_seconds, 300)
         for i in range(int(delay_seconds), 0, -1):
@@ -1160,7 +1196,7 @@ class TikTokBot:
 
             # Quay về Home sau khi follow xong (KHÔNG thoát app)
             self._go_back_to_home()
-
+            self._go_back_to_home()
             if follow_success:
                 self._add_response_message(f"[Follow Search] Follow @{username} thành công!", "follow")
             else:
@@ -1632,6 +1668,13 @@ class TikTokBot:
             if action_type not in ["like", "follow", "comment", "favorite"]:
                 return False, "Loại nhiệm vụ không hỗ trợ", None, 0
 
+            # Xử lý link nếu bị rỗng
+            if not link or link == "" or link == "null":
+                object_id = job_data.get("object_id")
+                if object_id:
+                    link = f"https://www.tiktok.com/@user/video/{object_id}"
+                    self._add_response_message(f"🔧 Build link từ object_id: {object_id} -> {link}")
+
             if not self._open_link(link):
                 return False, "Mở link thất bại", ads_id, job_price
 
@@ -1979,17 +2022,35 @@ class TikTokBot:
                     data = nhanjob.get("data")
                     
                     if not data or not data.get("link"):
+                        # Không có link - vẫn giữ nguyên logic cũ
                         num_videos_het_job = max(2, self.delay_config.get('nuoi_nick', 2) * 2)
                         share_rate_het_job = random.randint(30, 50)
                         self.nuoi_nick_short(num_videos=num_videos_het_job, share_rate=share_rate_het_job, is_high_trust_mode=True)
-                        
                         time.sleep(1.5)
                         continue
 
-                    current_link = data.get("link")
-                    self._update_current_link(current_link)
-
-                    if self._is_link_processed(current_link):
+                    # ==== XỬ LÝ LINK TỪ JOB_DATA (THÊM MỚI) ====
+                    link = data.get("link", "")
+                    
+                    # Check nếu link rỗng hoặc không hợp lệ, thử build từ object_id
+                    if not link or link == "" or link == "null":
+                        object_id = data.get("object_id")
+                        if object_id:
+                            # Build link cho TikTok (video)
+                            link = f"https://www.tiktok.com/@user/video/{object_id}"
+                            self._add_response_message(f" Build link từ object_id: {object_id} -> {link}")
+                        else:
+                            self._add_response_message(f" Không có link và không có object_id, bỏ qua job")
+                            skip_msg = self._baoloi(data["id"], data["object_id"], data["type"])
+                            continue
+                    
+                    # Chuẩn hóa link (loại bỏ khoảng trắng, xuống dòng)
+                    link = link.strip().split('\n')[0].split('\r')[0]
+                    self._update_current_link(link)
+                    # ==== KẾT THÚC XỬ LÝ LINK ====
+                    
+                    # Kiểm tra video đã xử lý chưa
+                    if self._is_link_processed(link):
                         skip_msg = self._baoloi(data["id"], data["object_id"], data["type"])
                         self._add_response_message(f" Đã bỏ qua video đã làm: {skip_msg.get('message', '')}")
                         continue
