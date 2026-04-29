@@ -103,6 +103,7 @@ SIMILARITY_THRESHOLD = 0.85
 DEFAULT_DELAY_CONFIG = {
     'like': [5, 5],
     'follow': [5, 5],
+    'comment': [5, 5],
     'favorite': [5, 5],
     'job': [5, 5],
     'delay_done': 9,
@@ -483,6 +484,7 @@ class TikTokBot:
         self.min_dump_interval = 0.05
 
         self.link_job_file = None
+        self.check_cmt_file = None
         self.processed_videos = []
         
         self.job_counter_since_restart = 0
@@ -494,10 +496,6 @@ class TikTokBot:
         self.max_username_retries = 5
         
         self.tiktok_version = None
-        
-        # Biến cho delay + nuôi nick song song
-        self._last_delay_second = -1
-        self._last_log_second = -1
 
         self._init_instance_files()
 
@@ -595,10 +593,15 @@ class TikTokBot:
     def _init_instance_files(self):
         safe_serial = re.sub(r'[^\w\-_]', '_', self.serial)
         self.link_job_file = os.path.join(DATA_DIR, f"device_{safe_serial}_link_job.json")
+        self.check_cmt_file = os.path.join(DATA_DIR, f"device_{safe_serial}_check_cmt.json")
         
         if not os.path.exists(self.link_job_file):
             with open(self.link_job_file, 'w', encoding='utf-8') as f:
                 json.dump({"processed_videos": []}, f)
+        
+        if not os.path.exists(self.check_cmt_file):
+            with open(self.check_cmt_file, 'w', encoding='utf-8') as f:
+                json.dump({"last_comment": "", "history": []}, f)
         
         self._load_processed_videos()
     
@@ -842,251 +845,85 @@ class TikTokBot:
             self._add_response_message(f"Lỗi hệ thống mở link: {str(e)[:80]}")
             return False
 
+    def _delay_countdown(self, delay_seconds, msg_prefix="Đang chờ"):
+        delay_seconds = min(delay_seconds, 300)
+        for i in range(int(delay_seconds), 0, -1):
+            if self.stop_flag or is_stop_all():
+                return
+            if i % 10 == 0 or i <= 3:
+                self._update_dashboard_status(f"{msg_prefix} {i}s")
+            time.sleep(1)
+    
     def _get_random_delay(self, job_type):
         if job_type in self.delay_config:
             min_delay, max_delay = self.delay_config[job_type]
             return random.randint(min_delay, max_delay)
         return random.randint(3, 7)
 
-    # ==================== DELAY + NUÔI NICK SONG SONG ====================
-    
-    def _delay_voi_nuoi_nick(self, delay_seconds, msg_prefix="Đang chờ", share_rate=15):
-        """
-        Delay kết hợp nuôi nick - LUÔN CÓ HÀNH ĐỘNG
-        KHÔNG sleep thuần, countdown log mỗi giây
-        """
-        if delay_seconds <= 0:
-            return
-        
-        delay_seconds = min(delay_seconds, 300)
-        start_time = time.time()
-        
-        # Thời gian mỗi video
-        video_duration = random.uniform(4, 8)
-        current_video_start = time.time()
-        action_count = 0
-        
-        # Reset counter log
-        self._last_delay_second = -1
-        
-        while time.time() - start_time < delay_seconds:
-            if self.stop_flag or is_stop_all():
-                break
-            
-            elapsed = time.time() - start_time
-            remaining = delay_seconds - elapsed
-            
-            # Log mỗi giây - HIỂN THỊ COUNTDOWN
-            current_second = int(elapsed)
-            if current_second > self._last_delay_second:
-                self._last_delay_second = current_second
-                self._update_dashboard_status(f"{msg_prefix} {int(remaining)}s | Đang nuôi nick...")
-            
-            # Xử lý video hiện tại
-            video_elapsed = time.time() - current_video_start
-            
-            if video_elapsed >= video_duration:
-                # Chuyển sang video mới
-                action_count += 1
-                
-                # Random share
-                if random.randint(1, 100) <= share_rate:
-                    self._do_share_and_copy_link()
-                    time.sleep(0.2)
-                
-                # Swipe lên video tiếp theo
-                try:
-                    w, h = self.device.window_size()
-                    x_mid = int(w * 0.5)
-                    start_y = int(h * 0.85)
-                    end_y = int(h * 0.2)
-                    self.device.swipe(x_mid, start_y, x_mid, end_y, duration=random.uniform(0.1, 0.2))
-                except:
-                    pass
-                
-                # Reset video mới
-                current_video_start = time.time()
-                video_duration = random.uniform(3, 7)
-                
-                # Thỉnh thoảng like
-                if action_count % 4 == 0 and random.randint(1, 100) <= 25:
-                    try:
-                        self.do_like()
-                    except:
-                        pass
-            
-            # Sleep rất ngắn để không tốn CPU
-            time.sleep(0.05)
-        
-        # Reset counter cho lần sau
-        self._last_delay_second = -1
-
-    # ========== SHARE VÀ COPY LINK ==========
-    
-    def _do_share_and_copy_link(self, max_retry=2):
-        """Share và copy link"""
-        try:
-            # Tìm và click nút share
-            share_btn = None
-            
-            # Cách 1: Tìm bằng resource-id
-            for res_id in ["share", "share_button", "icon_share", "iv_share"]:
-                try:
-                    btn = self.device(resourceIdMatches=f".*{res_id}.*")
-                    if btn.exists:
-                        share_btn = btn
-                        break
-                except:
-                    pass
-            
-            # Cách 2: Tìm bằng content-desc
-            if not share_btn:
-                try:
-                    btn = self.device(descriptionMatches="(?i)(share|chia sẻ|gửi)")
-                    if btn.exists:
-                        share_btn = btn
-                except:
-                    pass
-            
-            # Cách 3: Tìm bằng text
-            if not share_btn:
-                try:
-                    btn = self.device(textMatches="(?i)(share|chia sẻ)")
-                    if btn.exists:
-                        share_btn = btn
-                except:
-                    pass
-            
-            # Cách 4: Tìm bằng vị trí (nút share thường ở góc phải màn hình)
-            if not share_btn:
-                try:
-                    w, h = self.device.window_size()
-                    # Quét vùng góc phải
-                    for x in range(w - 180, w - 30, 40):
-                        for y in range(150, 450, 60):
-                            try:
-                                # Click thử
-                                self.device.click(x, y)
-                                time.sleep(0.5)
-                                # Kiểm tra xem có menu share hiện ra không
-                                if self.device(textMatches="(?i)(sao chép|copy|link)").exists:
-                                    share_btn = True
-                                    break
-                            except:
-                                pass
-                        if share_btn:
-                            break
-                except:
-                    pass
-            
-            if not share_btn:
-                return False
-            
-            # Click nút share
-            if hasattr(share_btn, 'click'):
-                share_btn.click()
-            time.sleep(0.8)
-            
-            # Tìm và click nút copy link
-            copy_selectors = [
-                ("text", "Sao chép liên kết"),
-                ("text", "Copy link"),
-                ("textContains", "Sao chép"),
-                ("textContains", "Copy"),
-                ("descriptionContains", "copy"),
-                ("descriptionContains", "link"),
-                ("resourceIdMatches", ".*copy.*"),
-            ]
-            
-            for attr, value in copy_selectors:
-                try:
-                    btn = self.device(**{attr: value})
-                    if btn.exists:
-                        btn.click()
-                        time.sleep(0.3)
-                        return True
-                except:
-                    pass
-            
-            # Back nếu không tìm thấy
-            self.device.press("back")
-            return False
-            
-        except Exception as e:
-            return False
-    
     # ========== NUÔI NICK ==========
     
-    def nuoi_nick_lien_tuc(self, duration_seconds, share_rate=15):
-        """Nuôi nick liên tục trong thời gian duration_seconds"""
-        if duration_seconds <= 0:
-            return 0
-        
-        duration_seconds = min(duration_seconds, 300)
-        start_time = time.time()
-        action_count = 0
-        
-        # Thời gian mỗi video
-        video_duration = random.uniform(4, 8)
-        current_video_start = time.time()
-        
-        # Reset counter log
-        self._last_log_second = -1
-        
-        while time.time() - start_time < duration_seconds:
-            if self.stop_flag or is_stop_all():
-                break
-            
-            elapsed = time.time() - start_time
-            remaining = duration_seconds - elapsed
-            
-            # Log mỗi giây
-            current_second = int(elapsed)
-            if current_second > self._last_log_second:
-                self._last_log_second = current_second
-                self._update_dashboard_status(f"Nuôi nick... {int(remaining)}s còn lại")
-            
-            # Xử lý video hiện tại
-            video_elapsed = time.time() - current_video_start
-            
-            if video_elapsed >= video_duration:
-                # Chuyển sang video mới
-                action_count += 1
-                
-                # Random share
-                if random.randint(1, 100) <= share_rate:
-                    self._do_share_and_copy_link()
-                    time.sleep(0.2)
-                
-                # Swipe lên video tiếp theo
-                try:
-                    w, h = self.device.window_size()
-                    x_mid = int(w * 0.5)
-                    start_y = int(h * 0.85)
-                    end_y = int(h * 0.2)
-                    self.device.swipe(x_mid, start_y, x_mid, end_y, duration=random.uniform(0.1, 0.2))
-                except:
-                    pass
-                
-                # Reset video mới
-                current_video_start = time.time()
-                video_duration = random.uniform(3, 7)
-                
-                # Thỉnh thoảng like
-                if action_count % 5 == 0 and random.randint(1, 100) <= 30:
-                    try:
-                        self.do_like()
-                    except:
-                        pass
-            
-            # Sleep rất ngắn
-            time.sleep(0.05)
-        
-        self._last_log_second = -1
-        return action_count
+    def _do_share_and_copy_link(self, max_retry=2):
+        try:
+            share_selectors = [
+                {"descriptionContains": "share"},
+                {"descriptionContains": "gửi"},
+                {"textContains": "Share"},
+                {"textContains": "Gửi"}
+            ]
+
+            start_time = time.time()
+            clicked_share = False
+            while time.time() - start_time < 12:
+                if self.stop_flag or is_stop_all():
+                    return False
+                for s in share_selectors:
+                    if self.device(**s).exists:
+                        self.device(**s).click()
+                        clicked_share = True
+                        break
+                if clicked_share:
+                    break
+                time.sleep(0.15)
+
+            if not clicked_share:
+                return False
+
+            copy_selectors = [
+                {"text": "Sao chép liên kết"},
+                {"textContains": "Sao chép"},
+                {"text": "Copy link"},
+                {"textContains": "Copy"},
+                {"descriptionContains": "copy"},
+                {"descriptionContains": "link"}
+            ]
+
+            start_time = time.time()
+            clicked_copy = False
+            while time.time() - start_time < 8:
+                if self.stop_flag or is_stop_all():
+                    return False
+                for s in copy_selectors:
+                    if self.device(**s).exists:
+                        self.device(**s).click()
+                        clicked_copy = True
+                        break
+                if clicked_copy:
+                    break
+                time.sleep(0.15)
+
+            if clicked_copy:
+                time.sleep(0.3)
+                if self.device(textMatches="(?i)(Sao chép liên kết|Copy link)").exists:
+                    self.device.press("back")
+                return True
+            else:
+                self.device.press("back")
+                return False
+
+        except Exception:
+            return False
     
     def nuoi_nick_short(self, num_videos=2, share_rate=15, is_high_trust_mode=False):
-        """Nuôi nick số lượng video nhất định"""
         try:
             if is_high_trust_mode:
                 share_rate = random.randint(30, 50)
@@ -1106,12 +943,13 @@ class TikTokBot:
                 pass
             
             success_share_count = 0
+            min_watch, max_watch = 5, 10
             
             for i in range(num_videos):
                 if self.stop_flag or is_stop_all():
                     break
                 
-                watch_time = random.uniform(5, 10)
+                watch_time = random.uniform(min_watch, max_watch)
                 
                 remaining = watch_time
                 while remaining > 0 and not self.stop_flag and not is_stop_all():
@@ -1141,8 +979,42 @@ class TikTokBot:
             
         except Exception:
             return 0
-
-    # ========== FOLLOW QUA TÌM KIẾM ==========
+    
+    def nuoi_nick_thong_minh(self, delay_seconds, share_rate=15):
+        if delay_seconds <= 0:
+            return 0
+        
+        delay_seconds = min(delay_seconds, 300)
+        
+        time_per_video = 9
+        max_videos = max(1, delay_seconds // time_per_video)
+        max_videos = min(max_videos, 5)
+        
+        if max_videos > 0:
+            start_time = time.time()
+            self.nuoi_nick_short(num_videos=max_videos, share_rate=share_rate)
+            elapsed = time.time() - start_time
+            
+            remaining = delay_seconds - elapsed
+            if remaining > 0:
+                for remaining_sec in range(int(remaining), 0, -1):
+                    if self.stop_flag or is_stop_all():
+                        break
+                    if remaining_sec % 5 == 0 or remaining_sec <= 3:
+                        self._update_dashboard_status(f"Đợi thêm {remaining_sec}s")
+                    time.sleep(1)
+            
+            return elapsed
+        else:
+            for remaining_sec in range(delay_seconds, 0, -1):
+                if self.stop_flag or is_stop_all():
+                    break
+                if remaining_sec % 5 == 0 or remaining_sec <= 3:
+                    self._update_dashboard_status(f"Đợi {remaining_sec}s")
+                time.sleep(1)
+            return delay_seconds
+    
+    # ========== FOLLOW QUA TÌM KIẾM (TÁCH RIÊNG - KHÔNG BANK THOÁT APP) ==========
     
     def _extract_username_from_link(self, link):
         try:
@@ -1254,7 +1126,10 @@ class TikTokBot:
             pass
     
     def do_follow_via_search(self, link):
-        """Follow qua tìm kiếm"""
+        """
+        Follow qua tìm kiếm - KHÔNG dùng lệnh bank thoát app
+        CHỈ được gọi khi follow_via_search == 1
+        """
         if not self.device:
             self._add_response_message("[Follow Search] Device không khả dụng", "follow")
             return False
@@ -1271,14 +1146,19 @@ class TikTokBot:
         self._add_response_message(f"[Follow Search] Bắt đầu tìm kiếm và follow @{username}", "follow")
 
         try:
+            # Quay về Home (CHỈ 2 lần back, không thoát app)
             self._go_back_to_home()
+
+            # Kiểm tra app có đang chạy không
             self._check_app_status()
 
+            # Tìm icon search
             if not self._click_search_icon():
                 self._add_response_message("[Follow Search] Không tìm thấy icon tìm kiếm", "follow")
                 self._go_back_to_home()
                 return False
             
+            # Chờ UI tìm kiếm
             if not self._wait_search_ui(timeout=6):
                 self._add_response_message("[Follow Search] Không chờ được UI tìm kiếm", "follow")
                 self._go_back_to_home()
@@ -1298,6 +1178,7 @@ class TikTokBot:
 
             follow_success = self._find_and_click_follow_in_search_results(username)
 
+            # Quay về Home sau khi follow xong (KHÔNG thoát app)
             self._go_back_to_home()
             self._go_back_to_home()
             if follow_success:
@@ -1315,10 +1196,10 @@ class TikTokBot:
                 pass
             return False
 
-    # ========== FOLLOW QUA LINK ==========
+    # ========== FOLLOW QUA LINK (GIỮ NGUYÊN CODE CŨ) ==========
     
     def do_follow_via_link(self, max_retry=3):
-        """Follow qua link"""
+        """Follow qua link - GIỮ NGUYÊN CODE CŨ, không sửa gì"""
         if not self.device:
             return False
 
@@ -1392,7 +1273,11 @@ class TikTokBot:
             return False
 
     def do_follow(self, max_retry=3, link=None):
-        """Follow - Điều hướng dựa trên follow_via_search"""
+        """
+        Follow - Điều hướng dựa trên follow_via_search
+        follow_via_search = 1: CHỈ dùng follow qua tìm kiếm
+        follow_via_search = 0: CHỈ dùng follow qua link (code cũ)
+        """
         follow_via_search = self.delay_config.get('follow_via_search', 0)
         
         if follow_via_search == 1:
@@ -1403,7 +1288,7 @@ class TikTokBot:
         else:
             return self.do_follow_via_link(max_retry)
     
-    # ========== LIKE ==========
+    # ========== LIKE (KHÔNG DÙNG LỆNH BANK) ==========
     
     def _is_like_node(self, node):
         res_id = node.get("resource-id", "")
@@ -1447,6 +1332,7 @@ class TikTokBot:
         if self.stop_flag or is_stop_all():
             return False
         
+        # Kiểm tra app có đang chạy không
         self._check_app_status()
         
         self._add_response_message("Đang làm nhiệm vụ Like", "like")
@@ -1495,7 +1381,7 @@ class TikTokBot:
         self._add_response_message("Like thất bại", "like")
         return False
     
-    # ========== FAVORITE ==========
+    # ========== FAVORITE (KHÔNG DÙNG LỆNH BANK) ==========
     
     def do_favorite(self, max_retry=5):
         """Favorite - KHÔNG dùng lệnh bank, KHÔNG thoát app"""
@@ -1505,6 +1391,7 @@ class TikTokBot:
         if self.stop_flag or is_stop_all():
             return False
         
+        # Kiểm tra app có đang chạy không
         self._check_app_status()
         
         try:
@@ -1545,6 +1432,137 @@ class TikTokBot:
             return False
             
         except Exception:
+            return False
+    
+    # ========== COMMENT (ĐÃ CẬP NHẬT - BẢN MỚI) ==========
+    
+    def _get_comment_text_from_job(self, job_data):
+        try:
+            # Ưu tiên lấy từ comment_run.message
+            comment_run = job_data.get('comment_run', {})
+            if comment_run and comment_run.get('message'):
+                return comment_run.get('message').strip()
+            # Fallback: lấy từ message trực tiếp
+            if job_data.get('message'):
+                return job_data.get('message').strip()
+            return job_data['data']['comment_run']['message'].strip()
+        except Exception:
+            return None
+    
+    def do_comment(self, text, link):
+        """Comment với cơ chế mới: mở comment -> nhập -> gửi"""
+        if not self.device:
+            return False
+
+        if self.stop_flag or is_stop_all():
+            return False
+
+        if not text or len(text.strip()) < 1:
+            self._add_response_message("Không có nội dung comment", "comment")
+            return False
+
+        comment_text = text.strip()
+        self._add_response_message(f"Đang comment: {comment_text[:50]}", "comment")
+
+        try:
+            # ========== BƯỚC 1: MỞ COMMENT ==========
+            self._add_response_message("Mở comment...", "comment")
+            
+            # Tìm nút comment bằng description
+            btn = self.device(descriptionContains="comment")
+            if not btn.exists:
+                btn = self.device(descriptionContains="bình luận")
+            
+            if not btn.exists:
+                self._add_response_message("✗ Không tìm thấy nút comment", "comment")
+                return False
+            
+            btn.click()
+            self._add_response_message("✓ Đã mở comment", "comment")
+            time.sleep(2)
+            
+            # ========== BƯỚC 2: NHẬP COMMENT ==========
+            self._add_response_message("Nhập comment...", "comment")
+            
+            box = self.device(className="android.widget.EditText")
+            if not box.exists:
+                self._add_response_message("✗ Không thấy ô nhập", "comment")
+                return False
+            
+            box.click()
+            time.sleep(0.5)
+            
+            try:
+                box.clear_text()
+            except:
+                pass
+            
+            # Nhập trực tiếp (hỗ trợ tiếng Việt)
+            box.set_text(comment_text)
+            self._add_response_message("✓ Đã nhập comment", "comment")
+            
+            # ========== BƯỚC 3: CLICK GỬI ==========
+            self._add_response_message("Tìm nút gửi...", "comment")
+            
+            # Tìm ô nhập để làm mốc
+            edit = self.device(className="android.widget.EditText")
+            if not edit.exists:
+                self._add_response_message("✗ Không thấy ô nhập", "comment")
+                return False
+            
+            ex1, ey1, ex2, ey2 = edit.bounds()
+            w, h = self.device.window_size()
+            sent = False
+            
+            # Scan vùng bên phải ô nhập (nút gửi luôn nằm đây)
+            for x in range(ex2, w, 40):
+                for y in range(ey1 - 80, ey2 + 80, 40):
+                    if self.stop_flag or is_stop_all():
+                        return False
+                    
+                    try:
+                        self.device.click(x, y)
+                        time.sleep(0.4)
+                        
+                        # Kiểm tra nếu đã gửi (ô input rỗng)
+                        new_box = self.device(className="android.widget.EditText")
+                        
+                        if not new_box.exists:
+                            self._add_response_message(f"✓ Click gửi tại ({x},{y})", "comment")
+                            sent = True
+                            break
+                        
+                        txt = new_box.get_text()
+                        if not txt or txt.strip() == "":
+                            self._add_response_message(f"✓ Click gửi tại ({x},{y})", "comment")
+                            sent = True
+                            break
+                            
+                    except:
+                        pass
+                
+                if sent:
+                    break
+            
+            # Fallback cuối (icon đỏ góc phải dưới)
+            if not sent:
+                self._add_response_message("Fallback click...", "comment")
+                self.device.click(w - 80, h - 250)
+                time.sleep(0.5)
+            
+            time.sleep(1)
+            self.device.press("back")
+            
+            self.previous_job_link = link
+            self._add_response_message("Comment thành công!", "comment")
+            return True
+            
+        except Exception as e:
+            self._add_response_message(f"Lỗi comment: {str(e)[:50]}", "comment")
+            try:
+                self.device.press("back")
+            except:
+                pass
             return False
     
     # ========== API GOLIKE ==========
@@ -1624,6 +1642,28 @@ class TikTokBot:
             
             data_response = parsed['data'].get("data") if parsed['data'] else None
             
+            # Xử lý data để đảm bảo comment_run được parse đúng
+            if data_response and isinstance(data_response, dict):
+                # Nếu data là object chứa jobs
+                jobs = data_response.get("jobs", data_response.get("data", []))
+                if isinstance(jobs, list):
+                    for job in jobs:
+                        if job.get("type") == "comment":
+                            # Đảm bảo comment_run tồn tại
+                            if "comment_run" not in job:
+                                job["comment_run"] = {}
+                            # Nếu message nằm trực tiếp trong data
+                            if "message" in job and not job["comment_run"].get("message"):
+                                job["comment_run"]["message"] = job["message"]
+            elif isinstance(data_response, list):
+                # Nếu data trực tiếp là list jobs
+                for job in data_response:
+                    if job.get("type") == "comment":
+                        if "comment_run" not in job:
+                            job["comment_run"] = {}
+                        if "message" in job and not job["comment_run"].get("message"):
+                            job["comment_run"]["message"] = job["message"]
+            
             return {"status": 200, "message": parsed['message'], "data": data_response}
         except Exception as e:
             return {"status": 500, "message": str(e)}
@@ -1655,7 +1695,9 @@ class TikTokBot:
             parsed = self._parse_api_response(response, "complete_jobs")
             
             if parsed['success']:
+                # Lấy message từ response
                 message = parsed.get('message', 'Thành công')
+                # Thử lấy message từ data nếu có
                 if parsed.get('data') and isinstance(parsed['data'], dict):
                     message = parsed['data'].get('message', message)
                 return {"status": True, "data": parsed.get('data'), "message": message}
@@ -1686,6 +1728,16 @@ class TikTokBot:
         except:
             return 0
     
+    def _get_favorite_status(self, job_data):
+        """Lấy status favorite từ job_data"""
+        try:
+            favorite_run = job_data.get("favorite_run", {})
+            if favorite_run:
+                return favorite_run.get("status", "pending")
+            return "pending"
+        except Exception:
+            return "pending"
+    
     def _process_job(self, job_data):
         try:
             if self.stop_flag or is_stop_all():
@@ -1696,15 +1748,28 @@ class TikTokBot:
             ads_id = job_data.get("id")
             job_price = self._get_job_price(job_data)
             
+            # Lấy message từ server (nếu có)
             server_message = job_data.get("message", "")
+            
+            # Xử lý comment_run để lấy message
+            comment_run = job_data.get("comment_run", {})
+            if comment_run and comment_run.get("message"):
+                server_message = comment_run.get("message", "")
+            
+            # Xử lý favorite_run nếu cần
+            favorite_run = job_data.get("favorite_run", {})
+            
+            # Cập nhật message từ server lên dashboard
+            if server_message:
+                self._add_response_message(f"📨 Server: {server_message}", action_type)
 
             if action_type == "follow" and job_price < self.min_follow_price:
                 return False, f"Job Follow giá {job_price}đ < {self.min_follow_price}đ", ads_id, job_price
 
-            # Chỉ hỗ trợ like, follow, favorite - KHÔNG comment
-            if action_type not in ["like", "follow", "favorite"]:
+            if action_type not in ["like", "follow", "comment", "favorite"]:
                 return False, "Loại nhiệm vụ không hỗ trợ", None, 0
 
+            # Xử lý link nếu bị rỗng
             if not link or link == "" or link == "null":
                 object_id = job_data.get("object_id")
                 if object_id:
@@ -1728,6 +1793,15 @@ class TikTokBot:
             elif action_type == "favorite":
                 success = self.do_favorite()
                 reason = "Favorite thất bại" if not success else "Favorite thành công"
+            elif action_type == "comment":
+                # Lấy comment text từ comment_run hoặc message trực tiếp
+                comment_text = self._get_comment_text_from_job(job_data)
+                
+                if not comment_text:
+                    return False, "API không cung cấp nội dung comment", ads_id, job_price
+                
+                success = self.do_comment(comment_text, link)
+                reason = "Comment thất bại" if not success else "Comment thành công"
 
             if not success:
                 return False, reason, ads_id, job_price
@@ -1736,6 +1810,7 @@ class TikTokBot:
             if result.get('status'):
                 video_id = self._get_video_id(link)
                 self._save_processed_video(video_id)
+                # Hiển thị message từ server nếu có
                 success_msg = result.get('message', 'Thành công')
                 if server_message:
                     success_msg = f"{success_msg} - {server_message}"
@@ -2043,8 +2118,7 @@ class TikTokBot:
                 self._update_dashboard_status(" Đang tìm nhiệm vụ")
                 
                 delay_time = self._get_random_delay('job')
-                share_rate_cao = random.randint(30, 50)
-                self._delay_voi_nuoi_nick(delay_time, "Chờ lấy job", share_rate=share_rate_cao)
+                self._delay_countdown(delay_time, " Đang tìm nhiệm vụ")
 
                 nhanjob = self._nhannv()
                 
@@ -2054,17 +2128,21 @@ class TikTokBot:
                     data = nhanjob.get("data")
                     
                     if not data or not data.get("link"):
+                        # Không có link - vẫn giữ nguyên logic cũ
                         num_videos_het_job = max(2, self.delay_config.get('nuoi_nick', 2) * 2)
                         share_rate_het_job = random.randint(30, 50)
                         self.nuoi_nick_short(num_videos=num_videos_het_job, share_rate=share_rate_het_job, is_high_trust_mode=True)
                         time.sleep(1.5)
                         continue
 
+                    # ==== XỬ LÝ LINK TỪ JOB_DATA (THÊM MỚI) ====
                     link = data.get("link", "")
                     
+                    # Check nếu link rỗng hoặc không hợp lệ, thử build từ object_id
                     if not link or link == "" or link == "null":
                         object_id = data.get("object_id")
                         if object_id:
+                            # Build link cho TikTok (video)
                             link = f"https://www.tiktok.com/@user/video/{object_id}"
                             self._add_response_message(f" Build link từ object_id: {object_id} -> {link}")
                         else:
@@ -2072,9 +2150,12 @@ class TikTokBot:
                             skip_msg = self._baoloi(data["id"], data["object_id"], data["type"])
                             continue
                     
+                    # Chuẩn hóa link (loại bỏ khoảng trắng, xuống dòng)
                     link = link.strip().split('\n')[0].split('\r')[0]
                     self._update_current_link(link)
+                    # ==== KẾT THÚC XỬ LÝ LINK ====
                     
+                    # Kiểm tra video đã xử lý chưa
                     if self._is_link_processed(link):
                         skip_msg = self._baoloi(data["id"], data["object_id"], data["type"])
                         self._add_response_message(f" Đã bỏ qua video đã làm: {skip_msg.get('message', '')}")
@@ -2089,6 +2170,7 @@ class TikTokBot:
                     status_map = {
                         "follow": " Đang follow",
                         "like": " Đang like",
+                        "comment": " Đang comment",
                         "favorite": " Đang favorite"
                     }
                     self._update_dashboard_status(status_map.get(data["type"], " Đang xử lý"))
@@ -2104,7 +2186,7 @@ class TikTokBot:
                         share_rate_normal = self.delay_config.get('share_rate', 15)
                         
                         if delay_time_done > 0:
-                            self._delay_voi_nuoi_nick(delay_time_done, "Delay sau job", share_rate=share_rate_normal)
+                            self.nuoi_nick_thong_minh(delay_time_done, share_rate_normal)
                         
                         if self.force_stop_after > 0 and self.job_count >= self.force_stop_after:
                             self._add_response_message(f" Đạt {self.job_count} job, force stop TikTok")
@@ -2131,7 +2213,7 @@ class TikTokBot:
                     share_rate_cao = random.randint(30, 50)
                     self.nuoi_nick_short(num_videos=num_videos, share_rate=share_rate_cao, is_high_trust_mode=True)
                     
-                    self._delay_voi_nuoi_nick(retry_wait, "Thử lại sau", share_rate=share_rate_cao)
+                    self._delay_countdown(retry_wait, "Thử lại sau")
                     
             except Exception as e:
                 if self.stop_flag or is_stop_all():
@@ -2139,12 +2221,12 @@ class TikTokBot:
                 
                 retry_wait = self._increment_retry_counter()
                 self._add_response_message(f"Lỗi: {str(e)} - Thử lại sau {retry_wait}s")
-                self._delay_voi_nuoi_nick(retry_wait, "Lỗi - Thử lại sau")
+                self._delay_countdown(retry_wait, " Lỗi - Thử lại sau")
         
         self._add_response_message(" Bot đã dừng")
 
 
-# ==================== CÁC HÀM HỖ TRỢ ====================
+# ==================== CÁC HÀM HỖ TRỢ (GIỮ NGUYÊN) ====================
 
 def banner():
     os.system('clear' if os.name == 'posix' else 'cls')
@@ -2160,7 +2242,7 @@ def banner():
       \033[38;2;120;255;230m            ░           ░                  ░ ░      ░ ░      ░  ░
 \033[0m
 
-\033[38;2;255;200;140m[</>] \033[38;2;200;160;255mADMIN: NHƯ ANH ĐÃ THẤY EM   \033[38;2;255;220;160mPhiên Bản: \033[38;2;120;255;220mv3.24
+\033[38;2;255;200;140m[</>] \033[38;2;200;160;255mADMIN: NHƯ ANH ĐÃ THẤY EM   \033[38;2;255;220;160mPhiên Bản: \033[38;2;120;255;220mv3.23
 \033[38;2;255;200;140m[</>] \033[38;2;200;160;255mNhóm Telegram: \033[38;2;120;255;220mhttps://t.me/se_meo_bao_an
 \033[38;2;190;235;210m───────────────────────────────────────────────────────────────────────\033[0m
 """
@@ -2206,6 +2288,7 @@ def setup_delay_config():
     
     delay_like = [delay_config['like'][0], delay_config['like'][1]]
     delay_follow = [delay_config['follow'][0], delay_config['follow'][1]]
+    delay_comment = [delay_config['comment'][0], delay_config['comment'][1]]
     delay_job = [delay_config['job'][0], delay_config['job'][1]]
     delay_fav = [delay_config['favorite'][0], delay_config['favorite'][1]]
     nuoi_nick = delay_config.get('nuoi_nick', 2)
@@ -2243,6 +2326,7 @@ def setup_delay_config():
 
         table.add_row(*row("Delay Like", delay_like, "#ff4d6d", "#ffd1dc", "#ff8fa3"))
         table.add_row(*row("Delay Follow", delay_follow, "#00c853", "#b9f6ca", "#69f0ae"))
+        table.add_row(*row("Delay Comment", delay_comment, "#00b0ff", "#80d8ff", "#40c4ff"))
         table.add_row(*row("Delay Get Jobs", delay_job, "#ff9100", "#ffd180", "#ffab40"))
         table.add_row(*row("Delay Favorite", delay_fav, "#a78bfa", "#c4b5fd", "#b388ff"))
 
@@ -2319,6 +2403,11 @@ def setup_delay_config():
             input_number(f"Delay Follow Max ({delay_follow[1]}): ", delay_follow[1])
         ]
 
+        delay_comment = [
+            input_number(f"Delay Comment Min ({delay_comment[0]}): ", delay_comment[0]),
+            input_number(f"Delay Comment Max ({delay_comment[1]}): ", delay_comment[1])
+        ]
+
         delay_job = [
             input_number(f"Delay Get Jobs Min ({delay_job[0]}): ", delay_job[0]),
             input_number(f"Delay Get Jobs Max ({delay_job[1]}): ", delay_job[1])
@@ -2348,6 +2437,7 @@ def setup_delay_config():
     delay_config = {
         'like': delay_like,
         'follow': delay_follow,
+        'comment': delay_comment,
         'favorite': delay_fav,
         'job': delay_job,
         'delay_done': delay_done,
@@ -2373,6 +2463,7 @@ def render_tablet(selections, current_idx):
     JOBS = [
         {"id": "like", "name": "Like", "color": "#ff9ecb"},
         {"id": "follow", "name": "Follow", "color": "#ffd54f"},
+        {"id": "comment", "name": "Comment", "color": "#00ffff"},
         {"id": "favorite", "name": "Favorite", "color": "#a78bfa"}
     ]
     
@@ -2413,6 +2504,7 @@ def menu_jobs():
     JOBS = [
         {"id": "like", "name": "Like", "color": "#ff9ecb"},
         {"id": "follow", "name": "Follow", "color": "#ffd54f"},
+        {"id": "comment", "name": "Comment", "color": "#00ffff"},
         {"id": "favorite", "name": "Favorite", "color": "#a78bfa"}
     ]
     
@@ -3157,12 +3249,14 @@ def run_dashboard():
 if __name__ == "__main__":
     clear_stop_all()
     
+    # Tạo event để đồng bộ dừng
     stop_event = threading.Event()
     
     def signal_handler(sig, frame):
         print("\n\033[93m Đang dừng tất cả các thiết bị...\033[0m")
         set_stop_all()
         stop_event.set()
+        # Đợi một chút để các luồng kịp nhận tín hiệu
         time.sleep(2)
         print("\033[92m Đã dừng toàn bộ tool\033[0m")
         sys.exit(0)
@@ -3170,6 +3264,7 @@ if __name__ == "__main__":
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
     
+    # Bỏ qua SIGPIPE để tránh lỗi khi CTRL+C
     try:
         signal.signal(signal.SIGPIPE, signal.SIG_DFL)
     except:
@@ -3229,13 +3324,16 @@ if __name__ == "__main__":
         futures = {executor.submit(run_worker, serial): serial for serial in selected_serials}
         
         try:
+            # Sử dụng as_completed với timeout để có thể kiểm tra stop_event thường xuyên
             while futures:
+                # Kiểm tra nếu có tín hiệu dừng
                 if stop_event.is_set() or is_stop_all():
                     console.print("\n[yellow] Đang hủy các tác vụ còn lại...[/]")
                     for future in futures:
                         future.cancel()
                     break
                 
+                # Chờ future hoàn thành với timeout ngắn
                 done = []
                 for future in list(futures.keys()):
                     if future.done():
@@ -3258,6 +3356,7 @@ if __name__ == "__main__":
             set_stop_all()
             stop_event.set()
             
+            # Hủy tất cả future đang chờ
             for future in futures:
                 future.cancel()
             
