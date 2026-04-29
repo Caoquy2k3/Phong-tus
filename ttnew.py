@@ -2767,6 +2767,17 @@ def display_auth_menu():
         time.sleep(1)
         return display_auth_menu()
 
+
+import time
+from rich.layout import Layout
+from rich.panel import Panel
+from rich.table import Table
+from rich.align import Align
+from rich import box
+from rich.live import Live
+import os
+from collections import deque
+
 # Biến global lưu thời gian bắt đầu tool để hiển thị lên UI
 if 'APP_START_TIME' not in globals():
     APP_START_TIME = time.time()
@@ -3012,7 +3023,7 @@ def make_dashboard_layout(animator):
     # Bỏ width cố định để auto co giãn
     # Thêm box delay countdown nếu có
     if delay_remaining > 0:
-        box1_content = f"[#00ff9c] DELAY:[/] [#ffd54f]{delay_remaining}s[/#ffd54f]\n[#00ff9c]Thời gian bắt đầu:[/] {start_time_str}"  
+        box1_content = f"[#00ff9c]⏰ DELAY:[/] [#ffd54f]{delay_remaining}s[/#ffd54f]\n[#00ff9c]Thời gian bắt đầu:[/] {start_time_str}"  
     else:
         box1_content = f"[#00ff9c]Thời gian bắt đầu:[/] {start_time_str}\n[#00ff9c]Đã chạy được:[/] {run_time_str}"
     
