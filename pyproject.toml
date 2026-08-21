@@ -1,0 +1,13 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "fb-link-converter"
+version = "1.0.0"
+description = "Chuyen doi link Facebook"
+requires-python = ">=3.9"
+dependencies = ["curl-cffi"]
+
+[tool.setuptools]
+py-modules = ["fb_link_converter"]
